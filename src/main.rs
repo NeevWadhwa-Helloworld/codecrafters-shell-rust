@@ -8,20 +8,16 @@ fn main() {
         io::stdout().flush().unwrap();
 
         let mut command = String::new();
-        if io::stdin().read_line(&mut command).unwrap() == 0 {
-            break; // EOF (Ctrl+D)
-        }
-
-        let command = command.trim_end_matches(['\n', '\r']);
+        io::stdin().read_line(&mut command).unwrap();
+        let command = command.trim_end_matches(['\n','\r']);
         if command.is_empty() {
             continue;
         }
 
-        let parts = parse_command_line(command);
-        if parts.is_empty() {
+        let parts=parse_command_line(command);
+        if parts.is_empty(){
             continue;
         }
-
         let cmd = parts[0].as_str();
         let args = &parts[1..];
 
@@ -33,13 +29,10 @@ fn main() {
             if let Ok(current_dir) = std::env::current_dir() {
                 println!("{}", current_dir.display());
             }
-        } else if cmd == "cd" {
+        }else if cmd=="cd"{
             let target = match args.first().map(|s| s.as_str()) {
-                None | Some("~") => std::env::var("HOME").ok(),
-                Some(path) if path.starts_with("~/") => {
-                    std::env::var("HOME").ok().map(|home| format!("{}{}", home, &path[1..]))
-                }
-                Some(path) => Some(path.to_string()),
+                Some("~") | None => std::env::var("HOME").ok(),
+                Some(path) => 
             };
 
             if let Some(target_path) = target {
@@ -47,9 +40,9 @@ fn main() {
                     println!("cd: {}: No such file or directory", target_path);
                 }
             }
-        } else if cmd == "type" {
+        }else if cmd == "type" {
             if let Some(&cmd_arg) = args.first() {
-                if is_builtin(cmd_arg) {
+                if cmd_arg == "echo" || cmd_arg == "type" || cmd_arg == "exit" || cmd_arg == "pwd" {
                     println!("{} is a shell builtin", cmd_arg);
                 } else if let Some(path) = get_executable_path(cmd_arg) {
                     println!("{} is {}", cmd_arg, path.display());
@@ -65,70 +58,19 @@ fn main() {
     }
 }
 
-fn is_builtin(cmd: &str) -> bool {
-    matches!(cmd, "echo" | "type" | "exit" | "pwd" | "cd")
-}
-
 fn parse_command_line(input: &str) -> Vec<String> {
     let mut args = Vec::new();
     let mut current_arg = String::new();
     let mut in_single_quote = false;
-    let mut in_double_quote = false;
-    let mut escaped = false;
     let mut token_started = false;
 
-    let mut chars = input.chars().peekable();
-
-    while let Some(ch) = chars.next() {
-        if escaped {
-            current_arg.push(ch);
-            escaped = false;
-            token_started = true;
-            continue;
-        }
-
-        if in_single_quote {
-            if ch == '\'' {
-                in_single_quote = false;
-            } else {
-                current_arg.push(ch);
-            }
-            token_started = true;
-            continue;
-        }
-
-        if in_double_quote {
-            if ch == '"' {
-                in_double_quote = false;
-            } else if ch == '\\' {
-                if let Some(&next_ch) = chars.peek() {
-                    if next_ch == '\\' || next_ch == '"' || next_ch == '$' || next_ch == '\n' {
-                        chars.next();
-                        current_arg.push(next_ch);
-                    } else {
-                        current_arg.push('\\');
-                    }
-                } else {
-                    current_arg.push('\\');
-                }
-            } else {
-                current_arg.push(ch);
-            }
-            token_started = true;
-            continue;
-        }
-
+    for ch in input.chars() {
         match ch {
-            '\\' => escaped = true,
             '\'' => {
-                in_single_quote = true;
+                in_single_quote = !in_single_quote;
                 token_started = true;
             }
-            '"' => {
-                in_double_quote = true;
-                token_started = true;
-            }
-            ' ' | '\t' => {
+            ' ' | '\t' if !in_single_quote => {
                 if token_started {
                     args.push(current_arg.clone());
                     current_arg.clear();
@@ -141,7 +83,6 @@ fn parse_command_line(input: &str) -> Vec<String> {
             }
         }
     }
-
     if token_started {
         args.push(current_arg);
     }
