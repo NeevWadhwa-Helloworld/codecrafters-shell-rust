@@ -64,9 +64,20 @@ fn parse_command_line(input: &str) -> Vec<String> {
     let mut in_single_quote = false;
     let mut in_double_quote = false;
     let mut token_started = false;
+    let mut escaped = false;
 
     for ch in input.chars() {
+        if escaped {
+            current_arg.push(ch);
+            token_started = true;
+            escaped = false;
+            continue;
+        }
+
         match ch {
+            '\\' if !in_single_quote && !in_double_quote => {
+                escaped = true;
+            }
             '\'' if !in_double_quote => {
                 in_single_quote = !in_single_quote;
                 token_started = true;
