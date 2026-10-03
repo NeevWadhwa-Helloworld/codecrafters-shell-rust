@@ -1,29 +1,41 @@
 #[allow(unused_imports)]
 use std::io::{self, Write};
+use std::process::Command;
 
 fn main() {
-    loop{
+    loop {
         print!("$ ");
         io::stdout().flush().unwrap();
 
-        let mut command=String::new();
+        let mut command = String::new();
         io::stdin().read_line(&mut command).unwrap();
-        command=command.trim().to_string();
-        if command == "exit" {
+        let command = command.trim();
+        if command.is_empty() {
+            continue;
+        }
+
+        let parts: Vec<&str> = command.split_whitespace().collect();
+        let cmd = parts[0];
+        let args = &parts[1..];
+
+        if cmd == "exit" {
             break;
-        }else if command.starts_with("echo "){
-            println!("{}", &command[5..]);
-        }else if command.starts_with("type "){
-            let cmd_arg = command[5..].trim();
-            if cmd_arg == "echo" || cmd_arg == "type" || cmd_arg == "exit" {
-                println!("{} is a shell builtin", cmd_arg);
-            } else if let Some(path) = get_executable_path(cmd_arg) {
-                println!("{} is {}", cmd_arg, path.display());
-            } else {
-                println!("{}: not found", cmd_arg);
+        } else if cmd == "echo" {
+            println!("{}", args.join(" "));
+        } else if cmd == "type" {
+            if let Some(&cmd_arg) = args.first() {
+                if cmd_arg == "echo" || cmd_arg == "type" || cmd_arg == "exit" {
+                    println!("{} is a shell builtin", cmd_arg);
+                } else if let Some(path) = get_executable_path(cmd_arg) {
+                    println!("{} is {}", cmd_arg, path.display());
+                } else {
+                    println!("{}: not found", cmd_arg);
+                }
             }
-        }else{
-            println!("{}: command not found",command);
+        } else if let Some(_path) = get_executable_path(cmd) {
+            let _ = Command::new(cmd).args(args).status();
+        } else {
+            println!("{}: command not found", cmd);
         }
     }
 }
