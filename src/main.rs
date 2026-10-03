@@ -80,6 +80,17 @@ fn parse_command_line(input: &str) -> Vec<String> {
             continue;
         }
 
+        if in_single_quote {
+            if ch == '\'' {
+                in_single_quote = false;
+            } else {
+                current_arg.push(ch);
+            }
+            token_started = true;
+            i += 1;
+            continue;
+        }
+
         if in_double_quote {
             if ch == '\\' {
                 if i + 1 < chars.len() {
@@ -109,18 +120,18 @@ fn parse_command_line(input: &str) -> Vec<String> {
         }
 
         match ch {
-            '\\' if !in_single_quote => {
+            '\\' => {
                 escaped = true;
             }
             '\'' => {
-                in_single_quote = !in_single_quote;
+                in_single_quote = true;
                 token_started = true;
             }
             '"' => {
                 in_double_quote = true;
                 token_started = true;
             }
-            ' ' | '\t' if !in_single_quote => {
+            ' ' | '\t' => {
                 if token_started {
                     args.push(current_arg.clone());
                     current_arg.clear();
