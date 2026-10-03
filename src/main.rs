@@ -26,7 +26,9 @@ fn main() {
             if let Ok(current_dir) = std::env::current_dir() {
                 println!("{}", current_dir.display());
             }
-        } else if cmd == "type" {
+        }else if cmd=="cd"{
+            set_current_dir(args).unwrap_or_else(|_| println!("cd: {args}: No such file or directory"));
+        }else if cmd == "type" {
             if let Some(&cmd_arg) = args.first() {
                 if cmd_arg == "echo" || cmd_arg == "type" || cmd_arg == "exit" || cmd_arg == "pwd" {
                     println!("{} is a shell builtin", cmd_arg);
