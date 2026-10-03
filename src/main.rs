@@ -66,27 +66,61 @@ fn parse_command_line(input: &str) -> Vec<String> {
     let mut token_started = false;
     let mut escaped = false;
 
-    for ch in input.chars() {
+    let chars: Vec<char> = input.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        let ch = chars[i];
+
         if escaped {
             current_arg.push(ch);
             token_started = true;
             escaped = false;
+            i += 1;
             continue;
         }
 
+        if in_double_quote {
+            if ch == '\\' {
+                if i + 1 < chars.len() {
+                    let next_ch = chars[i + 1];
+                    if next_ch == '"' || next_ch == '\\' {
+                        current_arg.push(next_ch);
+                        token_started = true;
+                        i += 2;
+                        continue;
+                    }
+                }
+                current_arg.push('\\');
+                token_started = true;
+                i += 1;
+                continue;
+            } else if ch == '"' {
+                in_double_quote = false;
+                token_started = true;
+                i += 1;
+                continue;
+            } else {
+                current_arg.push(ch);
+                token_started = true;
+                i += 1;
+                continue;
+            }
+        }
+
         match ch {
-            '\\' if !in_single_quote && !in_double_quote => {
+            '\\' if !in_single_quote => {
                 escaped = true;
             }
-            '\'' if !in_double_quote => {
+            '\'' => {
                 in_single_quote = !in_single_quote;
                 token_started = true;
             }
-            '"' if !in_single_quote => {
-                in_double_quote = !in_double_quote;
+            '"' => {
+                in_double_quote = true;
                 token_started = true;
             }
-            ' ' | '\t' if !in_single_quote && !in_double_quote => {
+            ' ' | '\t' if !in_single_quote => {
                 if token_started {
                     args.push(current_arg.clone());
                     current_arg.clear();
@@ -98,7 +132,10 @@ fn parse_command_line(input: &str) -> Vec<String> {
                 token_started = true;
             }
         }
+
+        i += 1;
     }
+
     if token_started {
         args.push(current_arg);
     }
