@@ -22,9 +22,13 @@ fn main() {
             break;
         } else if cmd == "echo" {
             println!("{}", args.join(" "));
+        } else if cmd == "pwd" {
+            if let Ok(current_dir) = std::env::current_dir() {
+                println!("{}", current_dir.display());
+            }
         } else if cmd == "type" {
             if let Some(&cmd_arg) = args.first() {
-                if cmd_arg == "echo" || cmd_arg == "type" || cmd_arg == "exit" {
+                if cmd_arg == "echo" || cmd_arg == "type" || cmd_arg == "exit" || cmd_arg == "pwd" {
                     println!("{} is a shell builtin", cmd_arg);
                 } else if let Some(path) = get_executable_path(cmd_arg) {
                     println!("{} is {}", cmd_arg, path.display());
