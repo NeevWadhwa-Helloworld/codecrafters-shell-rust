@@ -9,13 +9,16 @@ fn main() {
 
         let mut command = String::new();
         io::stdin().read_line(&mut command).unwrap();
-        let command = command.trim();
+        let command = command.trim_end_matches(['\n','\r']);
         if command.is_empty() {
             continue;
         }
 
-        let parts: Vec<&str> = command.split_whitespace().collect();
-        let cmd = parts[0];
+        let parts=parse_command_line(command);
+        if parts.is_empty(){
+            continue;
+        }
+        let cmd = parts[0].as_str();
         let args = &parts[1..];
 
         if cmd == "exit" {
@@ -53,6 +56,40 @@ fn main() {
             println!("{}: command not found", cmd);
         }
     }
+}
+
+fn parse_command_line(input: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current_arg = String::new();
+    let mut in_single_quote = false;
+    let mut token_started = false;
+
+    for ch in input.chars() {
+        match ch {
+            '\'' => {
+                in_single_quote = !in_single_quote;
+                token_started = true;
+            }
+            ' ' | '\t' if !in_single_quote => {
+                if token_started {
+                    args.push(current_arg.clone());
+                    current_arg.clear();
+                    token_started = false;
+                }
+            }
+            _ => {
+                current_arg.push(ch);
+                token_started = true;
+            }
+        }
+    }
+
+    // Push the final argument if one was in progress
+    if token_started {
+        args.push(current_arg);
+    }
+
+    args
 }
 
 fn get_executable_path(cmd: &str) -> Option<std::path::PathBuf> {
