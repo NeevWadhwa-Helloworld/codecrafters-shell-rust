@@ -17,7 +17,7 @@ fn main() {
             if(command[5..].trim()=="echo" || command[5..].trim()=="type" || command[5..].trim()=="exit"){
                 println!("{} is a shell builtin", command[5..].trim());
             }else{
-                println!("invalid_pineapple_command: not found");
+                println!("invalid_{}_command: not found",command[5..].trim());
             }
         }else{
             println!("{}: command not found",command);
