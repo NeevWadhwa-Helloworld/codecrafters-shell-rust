@@ -27,7 +27,16 @@ fn main() {
                 println!("{}", current_dir.display());
             }
         }else if cmd=="cd"{
-            set_current_dir(args).unwrap_or_else(|_| println!("cd: {args}: No such file or directory"));
+            let target = match args.first().copied() {
+                Some("~") | None => std::env::var("HOME").ok(),
+                Some(path) => Some(path.to_string()),
+            };
+
+            if let Some(target_path) = target {
+                if let Err(_) = std::env::set_current_dir(&target_path) {
+                    println!("cd: {}: No such file or directory", target_path);
+                }
+            }
         }else if cmd == "type" {
             if let Some(&cmd_arg) = args.first() {
                 if cmd_arg == "echo" || cmd_arg == "type" || cmd_arg == "exit" || cmd_arg == "pwd" {
