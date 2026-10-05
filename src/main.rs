@@ -1,6 +1,7 @@
 #[allow(unused_imports)]
+use std::fs::File;
 use std::io::{self, Write};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 fn main() {
     loop {
@@ -18,16 +19,45 @@ fn main() {
         if parts.is_empty() {
             continue;
         }
-        let cmd = parts[0].as_str();
-        let args = &parts[1..];
+
+        let mut stdout_file = None;
+        let mut clean_parts = Vec::new();
+
+        let mut i = 0;
+        while i < parts.len() {
+            if (parts[i] == ">" || parts[i] == "1>") && i + 1 < parts.len() {
+                stdout_file = Some(parts[i + 1].clone());
+                i += 2; // Skip both the operator and the target filename
+            } else {
+                clean_parts.push(parts[i].clone());
+                i += 1;
+            }
+        }
+
+        if clean_parts.is_empty() {
+            continue;
+        }
+
+        let cmd = clean_parts[0].as_str();
+        let args = &clean_parts[1..];
+
+        let write_output = |output: &str| {
+            if let Some(ref path) = stdout_file {
+                if let Ok(mut file) = File::create(path) {
+                    let _ = writeln!(file, "{}", output);
+                }
+            } else {
+                println!("{}", output);
+            }
+        };
 
         if cmd == "exit" {
             break;
         } else if cmd == "echo" {
-            println!("{}", args.join(" "));
+            write_output(&args.join(" "));
         } else if cmd == "pwd" {
             if let Ok(current_dir) = std::env::current_dir() {
-                println!("{}", current_dir.display());
+                write_output(&current_dir.display().to_string());
             }
         } else if cmd == "cd" {
             let target = match args.first().map(|s| s.as_str()) {
@@ -43,15 +73,24 @@ fn main() {
         } else if cmd == "type" {
             if let Some(cmd_arg) = args.first() {
                 if cmd_arg == "echo" || cmd_arg == "type" || cmd_arg == "exit" || cmd_arg == "pwd" {
-                    println!("{} is a shell builtin", cmd_arg);
+                    write_output(&format!("{} is a shell builtin", cmd_arg));
                 } else if let Some(path) = get_executable_path(cmd_arg) {
-                    println!("{} is {}", cmd_arg, path.display());
+                    write_output(&format!("{} is {}", cmd_arg, path.display()));
                 } else {
-                    println!("{}: not found", cmd_arg);
+                    write_output(&format!("{}: not found", cmd_arg));
                 }
             }
         } else if let Some(_path) = get_executable_path(cmd) {
-            let _ = Command::new(cmd).args(args).status();
+            let mut child_cmd = Command::new(cmd);
+            child_cmd.args(args);
+
+            if let Some(ref path) = stdout_file {
+                if let Ok(file) = File::create(path) {
+                    child_cmd.stdout(Stdio::from(file));
+                }
+            }
+
+            let _ = child_cmd.status();
         } else {
             println!("{}: command not found", cmd);
         }
