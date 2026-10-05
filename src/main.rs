@@ -46,10 +46,19 @@ fn main() {
         let cmd = clean_parts[0].as_str();
         let args = &clean_parts[1..];
 
-        // Helper macro/closure to route stdout
+        // --- CHANGE: Always create/truncate target redirection files up front ---
+        if let Some(ref path) = stdout_file {
+            let _ = File::create(path);
+        }
+        if let Some(ref path) = stderr_file {
+            let _ = File::create(path);
+        }
+
+        // Helper function to append to stdout target file (or print to stdout)
         let write_stdout = |output: &str| {
             if let Some(ref path) = stdout_file {
-                if let Ok(mut file) = File::create(path) {
+                // Open file in append mode since it was already truncated above
+                if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(path) {
                     let _ = writeln!(file, "{}", output);
                 }
             } else {
@@ -57,10 +66,11 @@ fn main() {
             }
         };
 
-        // Helper macro/closure to route stderr
+        // Helper function to append to stderr target file (or print to stderr)
         let write_stderr = |output: &str| {
             if let Some(ref path) = stderr_file {
-                if let Ok(mut file) = File::create(path) {
+                // Open file in append mode since it was already truncated above
+                if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(path) {
                     let _ = writeln!(file, "{}", output);
                 }
             } else {
@@ -101,16 +111,15 @@ fn main() {
             let mut child_cmd = Command::new(cmd);
             child_cmd.args(args);
 
-            // Redirect stdout if a target file is specified
+            // Open existing files in append mode so subprocess inherits them cleanly
             if let Some(ref path) = stdout_file {
-                if let Ok(file) = File::create(path) {
+                if let Ok(file) = std::fs::OpenOptions::new().append(true).open(path) {
                     child_cmd.stdout(Stdio::from(file));
                 }
             }
 
-            // Redirect stderr if a target file is specified
             if let Some(ref path) = stderr_file {
-                if let Ok(file) = File::create(path) {
+                if let Ok(file) = std::fs::OpenOptions::new().append(true).open(path) {
                     child_cmd.stderr(Stdio::from(file));
                 }
             }
