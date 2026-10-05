@@ -20,14 +20,19 @@ fn main() {
             continue;
         }
 
+        // Parse stdout and stderr redirection operators ('>', '1>', and '2>') from args
         let mut stdout_file = None;
+        let mut stderr_file = None;
         let mut clean_parts = Vec::new();
 
         let mut i = 0;
         while i < parts.len() {
             if (parts[i] == ">" || parts[i] == "1>") && i + 1 < parts.len() {
                 stdout_file = Some(parts[i + 1].clone());
-                i += 2; // Skip both the operator and the target filename
+                i += 2;
+            } else if parts[i] == "2>" && i + 1 < parts.len() {
+                stderr_file = Some(parts[i + 1].clone());
+                i += 2;
             } else {
                 clean_parts.push(parts[i].clone());
                 i += 1;
@@ -41,7 +46,8 @@ fn main() {
         let cmd = clean_parts[0].as_str();
         let args = &clean_parts[1..];
 
-        let write_output = |output: &str| {
+        // Helper macro/closure to route stdout
+        let write_stdout = |output: &str| {
             if let Some(ref path) = stdout_file {
                 if let Ok(mut file) = File::create(path) {
                     let _ = writeln!(file, "{}", output);
@@ -51,13 +57,24 @@ fn main() {
             }
         };
 
+        // Helper macro/closure to route stderr
+        let write_stderr = |output: &str| {
+            if let Some(ref path) = stderr_file {
+                if let Ok(mut file) = File::create(path) {
+                    let _ = writeln!(file, "{}", output);
+                }
+            } else {
+                eprintln!("{}", output);
+            }
+        };
+
         if cmd == "exit" {
             break;
         } else if cmd == "echo" {
-            write_output(&args.join(" "));
+            write_stdout(&args.join(" "));
         } else if cmd == "pwd" {
             if let Ok(current_dir) = std::env::current_dir() {
-                write_output(&current_dir.display().to_string());
+                write_stdout(&current_dir.display().to_string());
             }
         } else if cmd == "cd" {
             let target = match args.first().map(|s| s.as_str()) {
@@ -67,32 +84,40 @@ fn main() {
 
             if let Some(target_path) = target {
                 if let Err(_) = std::env::set_current_dir(&target_path) {
-                    println!("cd: {}: No such file or directory", target_path);
+                    write_stderr(&format!("cd: {}: No such file or directory", target_path));
                 }
             }
         } else if cmd == "type" {
             if let Some(cmd_arg) = args.first() {
                 if cmd_arg == "echo" || cmd_arg == "type" || cmd_arg == "exit" || cmd_arg == "pwd" {
-                    write_output(&format!("{} is a shell builtin", cmd_arg));
+                    write_stdout(&format!("{} is a shell builtin", cmd_arg));
                 } else if let Some(path) = get_executable_path(cmd_arg) {
-                    write_output(&format!("{} is {}", cmd_arg, path.display()));
+                    write_stdout(&format!("{} is {}", cmd_arg, path.display()));
                 } else {
-                    write_output(&format!("{}: not found", cmd_arg));
+                    write_stdout(&format!("{}: not found", cmd_arg));
                 }
             }
         } else if let Some(_path) = get_executable_path(cmd) {
             let mut child_cmd = Command::new(cmd);
             child_cmd.args(args);
 
+            // Redirect stdout if a target file is specified
             if let Some(ref path) = stdout_file {
                 if let Ok(file) = File::create(path) {
                     child_cmd.stdout(Stdio::from(file));
                 }
             }
 
+            // Redirect stderr if a target file is specified
+            if let Some(ref path) = stderr_file {
+                if let Ok(file) = File::create(path) {
+                    child_cmd.stderr(Stdio::from(file));
+                }
+            }
+
             let _ = child_cmd.status();
         } else {
-            println!("{}: command not found", cmd);
+            write_stderr(&format!("{}: command not found", cmd));
         }
     }
 }
