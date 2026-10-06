@@ -263,11 +263,20 @@ fn longest_common_prefix(strs: &[&String]) -> String {
     prefix
 }
 
-fn run_completer_script(script_path: &str, command_name: &str, word_being_completed: &str, previous_word: &str) -> Option<Vec<String>> {
+// Runs completer script passing arguments and setting COMP_LINE / COMP_POINT environment variables
+fn run_completer_script(
+    script_path: &str,
+    command_name: &str,
+    word_being_completed: &str,
+    previous_word: &str,
+    full_line: &str,
+) -> Option<Vec<String>> {
     let output = Command::new(script_path)
         .arg(command_name)
         .arg(word_being_completed)
         .arg(previous_word)
+        .env("COMP_LINE", full_line)
+        .env("COMP_POINT", full_line.len().to_string())
         .output()
         .ok()?;
 
@@ -306,7 +315,7 @@ fn read_line_with_completion(completion_specs: &BTreeMap<String, String>) -> Str
 
                     if let Some(script_path) = completion_specs.get(command_name) {
                         let tokens: Vec<&str> = buffer.split_whitespace().collect();
-                        
+
                         let (word_being_completed, previous_word) = if buffer.ends_with(' ') {
                             ("", tokens.last().copied().unwrap_or(""))
                         } else {
@@ -321,11 +330,16 @@ fn read_line_with_completion(completion_specs: &BTreeMap<String, String>) -> Str
                             previous_word
                         };
 
-                        if let Some(script_lines) = run_completer_script(script_path, command_name, word_being_completed, previous_word_str) {
+                        if let Some(script_lines) = run_completer_script(
+                            script_path,
+                            command_name,
+                            word_being_completed,
+                            previous_word_str,
+                            &buffer,
+                        ) {
                             if let Some(first_line) = script_lines.first() {
                                 let last_space_idx = buffer.rfind(' ').unwrap();
                                 let base_prefix = &buffer[..=last_space_idx];
-                                // Append trailing space after completed candidate
                                 let completed = format!("{}{}{} ", base_prefix, first_line, if first_line.ends_with('/') { "" } else { "" });
                                 print!("\r$ {}\x1b[K", completed);
                                 io::stdout().flush().unwrap();
