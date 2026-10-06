@@ -1,6 +1,6 @@
 #[allow(unused_imports)]
 use std::fs::File;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::process::{Command, Stdio};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -15,12 +15,13 @@ struct Redirection {
 }
 
 fn main() {
+    enable_raw_mode();
+
     loop {
         print!("$ ");
         io::stdout().flush().unwrap();
 
-        let mut command = String::new();
-        io::stdin().read_line(&mut command).unwrap();
+        let command = read_line_with_completion();
         let command = command.trim_end_matches(['\n', '\r']);
         if command.is_empty() {
             continue;
@@ -152,6 +153,62 @@ fn main() {
         }
     }
 }
+
+fn read_line_with_completion() -> String {
+    let builtins = ["echo", "exit"];
+    let mut buffer = String::new();
+    let mut stdin = io::stdin();
+
+    loop {
+        let mut byte = [0u8; 1];
+        if stdin.read_exact(&mut byte).is_err() {
+            break;
+        }
+
+        match byte[0] {
+            b'\t' => {
+                let matches: Vec<&&str> = builtins.iter().filter(|b| b.starts_with(&buffer)).collect();
+                if matches.len() == 1 {
+                    let completed = format!("{} ", matches[0]);
+                    print!("\r$ {}", completed);
+                    io::stdout().flush().unwrap();
+                    buffer = completed;
+                }
+            }
+            b'\n' | b'\r' => {
+                println!();
+                break;
+            }
+            127 | 8 => {
+                if !buffer.is_empty() {
+                    buffer.pop();
+                    print!("\r$ {}\x1b[K", buffer);
+                    io::stdout().flush().unwrap();
+                }
+            }
+            b => {
+                buffer.push(b as char);
+                print!("{}", b as char);
+                io::stdout().flush().unwrap();
+            }
+        }
+    }
+
+    buffer
+}
+
+#[cfg(unix)]
+fn enable_raw_mode() {
+    unsafe {
+        let mut termios: libc::termios = std::mem::zeroed();
+        libc::tcgetattr(libc::STDIN_FILENO, &mut termios);
+        termios.c_lflag &= !(libc::ICANON | libc::ECHO);
+        libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &termios);
+    }
+}
+
+#[cfg(not(unix))]
+fn enable_raw_mode() {}
 
 fn open_file_for_redir(redir: &Redirection) -> io::Result<File> {
     match redir.mode {
