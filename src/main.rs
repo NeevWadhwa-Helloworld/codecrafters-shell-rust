@@ -49,6 +49,12 @@ fn main() {
                     mode: RedirectMode::Overwrite,
                 });
                 i += 2;
+            } else if parts[i] == "2>>" && i + 1 < parts.len() {
+                stderr_redir = Some(Redirection {
+                    path: parts[i + 1].clone(),
+                    mode: RedirectMode::Append,
+                });
+                i += 2;
             } else if parts[i] == "2>" && i + 1 < parts.len() {
                 stderr_redir = Some(Redirection {
                     path: parts[i + 1].clone(),
