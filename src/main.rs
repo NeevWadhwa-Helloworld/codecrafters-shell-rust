@@ -263,8 +263,15 @@ fn longest_common_prefix(strs: &[&String]) -> String {
     prefix
 }
 
-fn run_completer_script(script_path: &str) -> Option<Vec<String>> {
-    let output = Command::new(script_path).output().ok()?;
+// Runs completer script passing argv[1], argv[2], argv[3]
+fn run_completer_script(script_path: &str, command_name: &str, word_being_completed: &str, previous_word: &str) -> Option<Vec<String>> {
+    let output = Command::new(script_path)
+        .arg(command_name)
+        .arg(word_being_completed)
+        .arg(previous_word)
+        .output()
+        .ok()?;
+
     if !output.status.success() {
         return None;
     }
@@ -299,16 +306,33 @@ fn read_line_with_completion(completion_specs: &BTreeMap<String, String>) -> Str
                     let command_name = &buffer[..first_space_idx];
 
                     if let Some(script_path) = completion_specs.get(command_name) {
-                        if let Some(script_lines) = run_completer_script(script_path) {
+                        let tokens: Vec<&str> = buffer.split_whitespace().collect();
+                        
+                        let (word_being_completed, previous_word) = if buffer.ends_with(' ') {
+                            ("", tokens.last().copied().unwrap_or(""))
+                        } else {
+                            let curr = tokens.last().copied().unwrap_or("");
+                            let prev = if tokens.len() >= 2 { tokens[tokens.len() - 2] } else { "" };
+                            (curr, prev)
+                        };
+
+                        let previous_word_str = if previous_word == command_name && tokens.len() == 1 {
+                            command_name
+                        } else {
+                            previous_word
+                        };
+
+                        if let Some(script_lines) = run_completer_script(script_path, command_name, word_being_completed, previous_word_str) {
                             if let Some(first_line) = script_lines.first() {
-                                let completed = format!("{} {} ", command_name, first_line);
+                                let last_space_idx = buffer.rfind(' ').unwrap();
+                                let base_prefix = &buffer[..=last_space_idx];
+                                let completed = format!("{}{}", base_prefix, first_line);
                                 print!("\r$ {}\x1b[K", completed);
                                 io::stdout().flush().unwrap();
                                 buffer = completed;
                                 tab_count = 0;
                                 continue;
                             } else {
-                                // If the completer script prints nothing to stdout, ring the bell and leave input unchanged
                                 print!("\x07");
                                 io::stdout().flush().unwrap();
                                 tab_count = 0;
