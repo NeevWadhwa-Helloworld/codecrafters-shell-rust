@@ -95,7 +95,7 @@ fn main() {
         };
 
         let write_stderr = |output: &str| {
-            if let Some(ref redir) = stderr_redir {
+            if let Some(ref redir) = stdout_redir {
                 if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(&redir.path) {
                     let _ = writeln!(file, "{}", output);
                 }
@@ -213,7 +213,12 @@ fn get_path_completions(path_str: &str) -> (String, Vec<String>) {
         for entry in entries.flatten() {
             if let Some(name) = entry.file_name().to_str() {
                 if name.starts_with(prefix) {
-                    completions.insert(format!("{}{}", dir_path, name));
+                    let full_item_path = search_dir.join(name);
+                    if full_item_path.is_dir() {
+                        completions.insert(format!("{}{}/", dir_path, name));
+                    } else {
+                        completions.insert(format!("{}{}", dir_path, name));
+                    }
                 }
             }
         }
@@ -267,7 +272,9 @@ fn read_line_with_completion() -> String {
                         io::stdout().flush().unwrap();
                         tab_count = 0;
                     } else if match_refs.len() == 1 {
-                        let completed = format!("{}{}{} ", base_prefix, match_refs[0], if match_refs[0].ends_with('/') { "" } else { "" });
+                        let matched_str = match_refs[0];
+                        let suffix = if matched_str.ends_with('/') { "" } else { " " };
+                        let completed = format!("{}{}{}", base_prefix, matched_str, suffix);
                         print!("\r$ {}\x1b[K", completed);
                         io::stdout().flush().unwrap();
                         buffer = completed;
@@ -287,7 +294,8 @@ fn read_line_with_completion() -> String {
                             tab_count = 1;
                         } else {
                             let display_names: Vec<&str> = match_refs.iter().map(|s| {
-                                if let Some(slash_idx) = s.rfind('/') {
+                                let trimmed = s.strip_suffix('/').unwrap_or(s);
+                                if let Some(slash_idx) = trimmed.rfind('/') {
                                     &s[slash_idx + 1..]
                                 } else {
                                     s.as_str()
