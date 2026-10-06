@@ -173,6 +173,10 @@ fn read_line_with_completion() -> String {
                     print!("\r$ {}", completed);
                     io::stdout().flush().unwrap();
                     buffer = completed;
+                } else {
+                    // Ring the terminal bell character (\x07) if there are no valid completions
+                    print!("\x07");
+                    io::stdout().flush().unwrap();
                 }
             }
             b'\n' | b'\r' => {
