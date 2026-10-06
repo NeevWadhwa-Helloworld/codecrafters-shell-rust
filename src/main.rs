@@ -1,5 +1,5 @@
 #[allow(unused_imports)]
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::Path;
@@ -18,6 +18,9 @@ struct Redirection {
 
 fn main() {
     enable_raw_mode();
+
+    // Map to store registered completion scripts: command_name -> script_path
+    let mut completion_specs: BTreeMap<String, String> = BTreeMap::new();
 
     loop {
         print!("$ ");
@@ -134,9 +137,19 @@ fn main() {
                 }
             }
         } else if cmd == "complete" {
-            if args.first().map(|s| s.as_str()) == Some("-p") {
+            if args.first().map(|s| s.as_str()) == Some("-C") {
+                if args.len() >= 3 {
+                    let script_path = &args[1];
+                    let target_cmd = &args[2];
+                    completion_specs.insert(target_cmd.clone(), script_path.clone());
+                }
+            } else if args.first().map(|s| s.as_str()) == Some("-p") {
                 if let Some(target_cmd) = args.get(1) {
-                    write_stderr(&format!("complete: {}: no completion specification", target_cmd));
+                    if let Some(script_path) = completion_specs.get(target_cmd) {
+                        write_stdout(&format!("complete -C '{}' {}", script_path, target_cmd));
+                    } else {
+                        write_stderr(&format!("complete: {}: no completion specification", target_cmd));
+                    }
                 }
             }
         } else if let Some(_path) = get_executable_path(cmd) {
