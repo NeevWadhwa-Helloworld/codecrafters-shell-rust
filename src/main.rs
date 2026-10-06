@@ -1,4 +1,5 @@
 #[allow(unused_imports)]
+use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::process::{Command, Stdio};
@@ -154,8 +155,45 @@ fn main() {
     }
 }
 
+fn get_all_completions() -> Vec<String> {
+    let mut completions = BTreeSet::new();
+
+    completions.insert("echo".to_string());
+    completions.insert("exit".to_string());
+
+    if let Some(path_var) = std::env::var_os("PATH") {
+        for path in std::env::split_paths(&path_var) {
+            if let Ok(entries) = std::fs::read_dir(path) {
+                for entry in entries.flatten() {
+                    let full_path = entry.path();
+                    if full_path.is_file() {
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::PermissionsExt;
+                            if let Ok(metadata) = full_path.metadata() {
+                                if metadata.permissions().mode() & 0o111 != 0 {
+                                    if let Some(name) = full_path.file_name().and_then(|n| n.to_str()) {
+                                        completions.insert(name.to_string());
+                                    }
+                                }
+                            }
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            if let Some(name) = full_path.file_name().and_then(|n| n.to_str()) {
+                                completions.insert(name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    completions.into_iter().collect()
+}
+
 fn read_line_with_completion() -> String {
-    let builtins = ["echo", "exit"];
     let mut buffer = String::new();
     let mut stdin = io::stdin();
 
@@ -167,14 +205,14 @@ fn read_line_with_completion() -> String {
 
         match byte[0] {
             b'\t' => {
-                let matches: Vec<&&str> = builtins.iter().filter(|b| b.starts_with(&buffer)).collect();
+                let candidates = get_all_completions();
+                let matches: Vec<&String> = candidates.iter().filter(|c| c.starts_with(&buffer)).collect();
                 if matches.len() == 1 {
                     let completed = format!("{} ", matches[0]);
                     print!("\r$ {}", completed);
                     io::stdout().flush().unwrap();
                     buffer = completed;
                 } else {
-                    // Ring the terminal bell character (\x07) if there are no valid completions
                     print!("\x07");
                     io::stdout().flush().unwrap();
                 }
