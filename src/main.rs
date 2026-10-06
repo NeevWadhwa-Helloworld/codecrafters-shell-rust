@@ -134,7 +134,11 @@ fn main() {
                 }
             }
         } else if cmd == "complete" {
-            // Nop for now as required for this stage
+            if args.first().map(|s| s.as_str()) == Some("-p") {
+                if let Some(target_cmd) = args.get(1) {
+                    write_stderr(&format!("complete: {}: no completion specification", target_cmd));
+                }
+            }
         } else if let Some(_path) = get_executable_path(cmd) {
             let mut child_cmd = Command::new(cmd);
             child_cmd.args(args);
