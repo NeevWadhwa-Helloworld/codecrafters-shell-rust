@@ -3,6 +3,17 @@ use std::fs::File;
 use std::io::{self, Write};
 use std::process::{Command, Stdio};
 
+#[derive(Clone, Copy, PartialEq)]
+enum RedirectMode {
+    Overwrite,
+    Append,
+}
+
+struct Redirection {
+    path: String,
+    mode: RedirectMode,
+}
+
 fn main() {
     loop {
         print!("$ ");
@@ -20,18 +31,29 @@ fn main() {
             continue;
         }
 
-        // Parse stdout and stderr redirection operators ('>', '1>', and '2>') from args
-        let mut stdout_file = None;
-        let mut stderr_file = None;
+        let mut stdout_redir: Option<Redirection> = None;
+        let mut stderr_redir: Option<Redirection> = None;
         let mut clean_parts = Vec::new();
 
         let mut i = 0;
         while i < parts.len() {
-            if (parts[i] == ">" || parts[i] == "1>") && i + 1 < parts.len() {
-                stdout_file = Some(parts[i + 1].clone());
+            if (parts[i] == ">>" || parts[i] == "1>>") && i + 1 < parts.len() {
+                stdout_redir = Some(Redirection {
+                    path: parts[i + 1].clone(),
+                    mode: RedirectMode::Append,
+                });
+                i += 2;
+            } else if (parts[i] == ">" || parts[i] == "1>") && i + 1 < parts.len() {
+                stdout_redir = Some(Redirection {
+                    path: parts[i + 1].clone(),
+                    mode: RedirectMode::Overwrite,
+                });
                 i += 2;
             } else if parts[i] == "2>" && i + 1 < parts.len() {
-                stderr_file = Some(parts[i + 1].clone());
+                stderr_redir = Some(Redirection {
+                    path: parts[i + 1].clone(),
+                    mode: RedirectMode::Overwrite,
+                });
                 i += 2;
             } else {
                 clean_parts.push(parts[i].clone());
@@ -46,19 +68,16 @@ fn main() {
         let cmd = clean_parts[0].as_str();
         let args = &clean_parts[1..];
 
-        // --- CHANGE: Always create/truncate target redirection files up front ---
-        if let Some(ref path) = stdout_file {
-            let _ = File::create(path);
+        if let Some(ref redir) = stdout_redir {
+            let _ = open_file_for_redir(redir);
         }
-        if let Some(ref path) = stderr_file {
-            let _ = File::create(path);
+        if let Some(ref redir) = stderr_redir {
+            let _ = open_file_for_redir(redir);
         }
 
-        // Helper function to append to stdout target file (or print to stdout)
         let write_stdout = |output: &str| {
-            if let Some(ref path) = stdout_file {
-                // Open file in append mode since it was already truncated above
-                if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(path) {
+            if let Some(ref redir) = stdout_redir {
+                if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(&redir.path) {
                     let _ = writeln!(file, "{}", output);
                 }
             } else {
@@ -66,11 +85,9 @@ fn main() {
             }
         };
 
-        // Helper function to append to stderr target file (or print to stderr)
         let write_stderr = |output: &str| {
-            if let Some(ref path) = stderr_file {
-                // Open file in append mode since it was already truncated above
-                if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(path) {
+            if let Some(ref redir) = stderr_redir {
+                if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(&redir.path) {
                     let _ = writeln!(file, "{}", output);
                 }
             } else {
@@ -111,15 +128,14 @@ fn main() {
             let mut child_cmd = Command::new(cmd);
             child_cmd.args(args);
 
-            // Open existing files in append mode so subprocess inherits them cleanly
-            if let Some(ref path) = stdout_file {
-                if let Ok(file) = std::fs::OpenOptions::new().append(true).open(path) {
+            if let Some(ref redir) = stdout_redir {
+                if let Ok(file) = std::fs::OpenOptions::new().append(true).open(&redir.path) {
                     child_cmd.stdout(Stdio::from(file));
                 }
             }
 
-            if let Some(ref path) = stderr_file {
-                if let Ok(file) = std::fs::OpenOptions::new().append(true).open(path) {
+            if let Some(ref redir) = stderr_redir {
+                if let Ok(file) = std::fs::OpenOptions::new().append(true).open(&redir.path) {
                     child_cmd.stderr(Stdio::from(file));
                 }
             }
@@ -128,6 +144,16 @@ fn main() {
         } else {
             write_stderr(&format!("{}: command not found", cmd));
         }
+    }
+}
+
+fn open_file_for_redir(redir: &Redirection) -> io::Result<File> {
+    match redir.mode {
+        RedirectMode::Overwrite => File::create(&redir.path),
+        RedirectMode::Append => std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&redir.path),
     }
 }
 
