@@ -15,14 +15,10 @@ struct Redirection {
 }
 
 fn main() {
-    // Enable raw terminal mode so we can capture keypresses (like Tab) immediately
-    enable_raw_mode();
-
     loop {
         print!("$ ");
         io::stdout().flush().unwrap();
 
-        // Read user input character-by-character with tab completion support
         let command = read_line_with_completion();
         let command = command.trim_end_matches(['\n', '\r']);
         if command.is_empty() {
@@ -156,7 +152,6 @@ fn main() {
     }
 }
 
-// Custom input reader that handles raw keypresses and autocompletion for builtins
 fn read_line_with_completion() -> String {
     let builtins = ["echo", "exit"];
     let mut buffer = String::new();
@@ -169,31 +164,26 @@ fn read_line_with_completion() -> String {
         }
 
         match byte[0] {
-            // TAB key handling for completion
             b'\t' => {
                 let matches: Vec<&&str> = builtins.iter().filter(|b| b.starts_with(&buffer)).collect();
-                // If exactly one builtin matches the typed prefix, complete it
                 if matches.len() == 1 {
-                    let completed = format!("{} ", matches[0]); // Add trailing space as required
+                    let completed = format!("{} ", matches[0]);
                     print!("\r$ {}", completed);
                     io::stdout().flush().unwrap();
                     buffer = completed;
                 }
             }
-            // Enter key handling
             b'\n' | b'\r' => {
                 println!();
                 break;
             }
-            // Backspace handling
             127 | 8 => {
                 if !buffer.is_empty() {
                     buffer.pop();
-                    print!("\r$ {}\x1b[K", buffer); // \x1b[K clears line from cursor to end
+                    print!("\r$ {}\x1b[K", buffer);
                     io::stdout().flush().unwrap();
                 }
             }
-            // Standard character input
             b => {
                 buffer.push(b as char);
                 print!("{}", b as char);
@@ -204,21 +194,6 @@ fn read_line_with_completion() -> String {
 
     buffer
 }
-
-// Disables canonical mode and local echo on Unix systems so stdin reads single bytes instantly
-#[cfg(unix)]
-fn enable_raw_mode() {
-    unsafe {
-        let mut termios: libc::termios = std::mem::zeroed();
-        libc::tcgetattr(libc::STDIN_FILENO, &mut termios);
-        termios.c_lflag &= !(libc::ICANON | libc::ECHO);
-        libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &termios);
-    }
-}
-
-// Fallback no-op for non-Unix environments
-#[cfg(not(unix))]
-fn enable_raw_mode() {}
 
 fn open_file_for_redir(redir: &Redirection) -> io::Result<File> {
     match redir.mode {
@@ -331,20 +306,7 @@ fn get_executable_path(cmd: &str) -> Option<std::path::PathBuf> {
         for path in std::env::split_paths(&path_var) {
             let full_path = path.join(cmd);
             if full_path.is_file() {
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    if let Ok(metadata) = full_path.metadata() {
-                        let mode = metadata.permissions().mode();
-                        if mode & 0o111 != 0 {
-                            return Some(full_path);
-                        }
-                    }
-                }
-                #[cfg(not(unix))]
-                {
-                    return Some(full_path);
-                }
+                return Some(full_path);
             }
         }
     }
