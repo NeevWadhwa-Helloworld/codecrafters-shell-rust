@@ -213,7 +213,7 @@ fn enable_raw_mode() {
         c_ospeed: u32,
     }
 
-    extern "C" {
+    unsafe extern "C" {
         fn tcgetattr(fd: i32, termios_p: *mut Termios) -> i32;
         fn tcsetattr(fd: i32, optional_actions: i32, termios_p: *const Termios) -> i32;
     }
@@ -346,7 +346,20 @@ fn get_executable_path(cmd: &str) -> Option<std::path::PathBuf> {
         for path in std::env::split_paths(&path_var) {
             let full_path = path.join(cmd);
             if full_path.is_file() {
-                return Some(full_path);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    if let Ok(metadata) = full_path.metadata() {
+                        let mode = metadata.permissions().mode();
+                        if mode & 0o111 != 0 {
+                            return Some(full_path);
+                        }
+                    }
+                }
+                #[cfg(not(unix))]
+                {
+                    return Some(full_path);
+                }
             }
         }
     }
