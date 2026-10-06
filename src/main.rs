@@ -15,6 +15,8 @@ struct Redirection {
 }
 
 fn main() {
+    enable_raw_mode();
+
     loop {
         print!("$ ");
         io::stdout().flush().unwrap();
@@ -194,6 +196,44 @@ fn read_line_with_completion() -> String {
 
     buffer
 }
+
+#[cfg(unix)]
+fn enable_raw_mode() {
+    use std::os::unix::io::AsRawFd;
+
+    #[repr(C)]
+    struct Termios {
+        c_iflag: u32,
+        c_oflag: u32,
+        c_cflag: u32,
+        c_lflag: u32,
+        c_line: u8,
+        c_cc: [u8; 32],
+        c_ispeed: u32,
+        c_ospeed: u32,
+    }
+
+    extern "C" {
+        fn tcgetattr(fd: i32, termios_p: *mut Termios) -> i32;
+        fn tcsetattr(fd: i32, optional_actions: i32, termios_p: *const Termios) -> i32;
+    }
+
+    const ICANON: u32 = 0x00000002;
+    const ECHO: u32 = 0x00000008;
+    const TCSANOW: i32 = 0;
+
+    unsafe {
+        let fd = io::stdin().as_raw_fd();
+        let mut termios: Termios = std::mem::zeroed();
+        if tcgetattr(fd, &mut termios) == 0 {
+            termios.c_lflag &= !(ICANON | ECHO);
+            tcsetattr(fd, TCSANOW, &termios);
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn enable_raw_mode() {}
 
 fn open_file_for_redir(redir: &Redirection) -> io::Result<File> {
     match redir.mode {
