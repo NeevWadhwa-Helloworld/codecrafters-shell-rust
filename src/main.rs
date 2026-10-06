@@ -307,6 +307,12 @@ fn read_line_with_completion(completion_specs: &BTreeMap<String, String>) -> Str
                                 buffer = completed;
                                 tab_count = 0;
                                 continue;
+                            } else {
+                                // If the completer script prints nothing to stdout, ring the bell and leave input unchanged
+                                print!("\x07");
+                                io::stdout().flush().unwrap();
+                                tab_count = 0;
+                                continue;
                             }
                         }
                     }
