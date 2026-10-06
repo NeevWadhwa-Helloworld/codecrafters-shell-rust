@@ -19,14 +19,13 @@ struct Redirection {
 fn main() {
     enable_raw_mode();
 
-    // Map to store registered completion scripts: command_name -> script_path
     let mut completion_specs: BTreeMap<String, String> = BTreeMap::new();
 
     loop {
         print!("$ ");
         io::stdout().flush().unwrap();
 
-        let command = read_line_with_completion();
+        let command = read_line_with_completion(&completion_specs);
         let command = command.trim_end_matches(['\n', '\r']);
         if command.is_empty() {
             continue;
@@ -264,7 +263,23 @@ fn longest_common_prefix(strs: &[&String]) -> String {
     prefix
 }
 
-fn read_line_with_completion() -> String {
+fn run_completer_script(script_path: &str) -> Option<Vec<String>> {
+    let output = Command::new(script_path).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout_str = String::from_utf8(output.stdout).ok()?;
+    let lines: Vec<String> = stdout_str
+        .lines()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    Some(lines)
+}
+
+fn read_line_with_completion(completion_specs: &BTreeMap<String, String>) -> String {
     let mut buffer = String::new();
     let mut stdin = io::stdin();
     let mut tab_count = 0;
@@ -280,6 +295,22 @@ fn read_line_with_completion() -> String {
                 let is_arg_completion = buffer.contains(' ');
 
                 if is_arg_completion {
+                    let first_space_idx = buffer.find(' ').unwrap();
+                    let command_name = &buffer[..first_space_idx];
+
+                    if let Some(script_path) = completion_specs.get(command_name) {
+                        if let Some(script_lines) = run_completer_script(script_path) {
+                            if let Some(first_line) = script_lines.first() {
+                                let completed = format!("{} {} ", command_name, first_line);
+                                print!("\r$ {}\x1b[K", completed);
+                                io::stdout().flush().unwrap();
+                                buffer = completed;
+                                tab_count = 0;
+                                continue;
+                            }
+                        }
+                    }
+
                     let last_space_idx = buffer.rfind(' ').unwrap();
                     let base_prefix = &buffer[..=last_space_idx];
                     let partial_arg = &buffer[last_space_idx + 1..];
