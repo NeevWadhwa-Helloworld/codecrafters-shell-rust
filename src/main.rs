@@ -2,6 +2,7 @@
 use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::{self, Read, Write};
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -94,7 +95,7 @@ fn main() {
         };
 
         let write_stderr = |output: &str| {
-            if let Some(ref redir) = stdout_redir {
+            if let Some(ref redir) = stderr_redir {
                 if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(&redir.path) {
                     let _ = writeln!(file, "{}", output);
                 }
@@ -193,18 +194,32 @@ fn get_executable_completions() -> Vec<String> {
     completions.into_iter().collect()
 }
 
-fn get_filename_completions() -> Vec<String> {
+fn get_path_completions(path_str: &str) -> (String, Vec<String>) {
     let mut completions = BTreeSet::new();
 
-    if let Ok(entries) = std::fs::read_dir(".") {
+    let (dir_path, prefix) = if let Some(last_slash_idx) = path_str.rfind('/') {
+        (&path_str[..=last_slash_idx], &path_str[last_slash_idx + 1..])
+    } else {
+        ("", path_str)
+    };
+
+    let search_dir = if dir_path.is_empty() {
+        Path::new(".")
+    } else {
+        Path::new(dir_path)
+    };
+
+    if let Ok(entries) = std::fs::read_dir(search_dir) {
         for entry in entries.flatten() {
             if let Some(name) = entry.file_name().to_str() {
-                completions.insert(name.to_string());
+                if name.starts_with(prefix) {
+                    completions.insert(format!("{}{}", dir_path, name));
+                }
             }
         }
     }
 
-    completions.into_iter().collect()
+    (dir_path.to_string(), completions.into_iter().collect())
 }
 
 fn longest_common_prefix(strs: &[&String]) -> String {
@@ -239,49 +254,84 @@ fn read_line_with_completion() -> String {
             b'\t' => {
                 let is_arg_completion = buffer.contains(' ');
 
-                let (prefix_to_match, base_prefix) = if is_arg_completion {
+                if is_arg_completion {
                     let last_space_idx = buffer.rfind(' ').unwrap();
-                    (&buffer[last_space_idx + 1..], &buffer[..=last_space_idx])
-                } else {
-                    (buffer.as_str(), "")
-                };
+                    let base_prefix = &buffer[..=last_space_idx];
+                    let partial_arg = &buffer[last_space_idx + 1..];
 
-                let candidates = if is_arg_completion {
-                    get_filename_completions()
-                } else {
-                    get_executable_completions()
-                };
+                    let (_, matches) = get_path_completions(partial_arg);
+                    let match_refs: Vec<&String> = matches.iter().collect();
 
-                let matches: Vec<&String> = candidates.iter().filter(|c| c.starts_with(prefix_to_match)).collect();
-
-                if matches.is_empty() {
-                    print!("\x07");
-                    io::stdout().flush().unwrap();
-                    tab_count = 0;
-                } else if matches.len() == 1 {
-                    let completed = format!("{}{}{} ", base_prefix, matches[0], if is_arg_completion && matches[0].ends_with('/') { "" } else { "" });
-                    print!("\r$ {}\x1b[K", completed);
-                    io::stdout().flush().unwrap();
-                    buffer = completed;
-                    tab_count = 0;
-                } else {
-                    let lcp = longest_common_prefix(&matches);
-
-                    if lcp.len() > prefix_to_match.len() {
-                        let completed = format!("{}{}", base_prefix, lcp);
+                    if match_refs.is_empty() {
+                        print!("\x07");
+                        io::stdout().flush().unwrap();
+                        tab_count = 0;
+                    } else if match_refs.len() == 1 {
+                        let completed = format!("{}{}{} ", base_prefix, match_refs[0], if match_refs[0].ends_with('/') { "" } else { "" });
                         print!("\r$ {}\x1b[K", completed);
                         io::stdout().flush().unwrap();
                         buffer = completed;
                         tab_count = 0;
-                    } else if tab_count == 0 {
+                    } else {
+                        let lcp = longest_common_prefix(&match_refs);
+
+                        if lcp.len() > partial_arg.len() {
+                            let completed = format!("{}{}", base_prefix, lcp);
+                            print!("\r$ {}\x1b[K", completed);
+                            io::stdout().flush().unwrap();
+                            buffer = completed;
+                            tab_count = 0;
+                        } else if tab_count == 0 {
+                            print!("\x07");
+                            io::stdout().flush().unwrap();
+                            tab_count = 1;
+                        } else {
+                            let display_names: Vec<&str> = match_refs.iter().map(|s| {
+                                if let Some(slash_idx) = s.rfind('/') {
+                                    &s[slash_idx + 1..]
+                                } else {
+                                    s.as_str()
+                                }
+                            }).collect();
+                            let options = display_names.join("  ");
+                            print!("\n{}\n$ {}", options, buffer);
+                            io::stdout().flush().unwrap();
+                            tab_count = 0;
+                        }
+                    }
+                } else {
+                    let candidates = get_executable_completions();
+                    let matches: Vec<&String> = candidates.iter().filter(|c| c.starts_with(&buffer)).collect();
+
+                    if matches.is_empty() {
                         print!("\x07");
                         io::stdout().flush().unwrap();
-                        tab_count = 1;
-                    } else {
-                        let options = matches.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("  ");
-                        print!("\n{}\n$ {}", options, buffer);
-                        io::stdout().flush().unwrap();
                         tab_count = 0;
+                    } else if matches.len() == 1 {
+                        let completed = format!("{} ", matches[0]);
+                        print!("\r$ {}\x1b[K", completed);
+                        io::stdout().flush().unwrap();
+                        buffer = completed;
+                        tab_count = 0;
+                    } else {
+                        let lcp = longest_common_prefix(&matches);
+
+                        if lcp.len() > buffer.len() {
+                            let completed = lcp;
+                            print!("\r$ {}\x1b[K", completed);
+                            io::stdout().flush().unwrap();
+                            buffer = completed;
+                            tab_count = 0;
+                        } else if tab_count == 0 {
+                            print!("\x07");
+                            io::stdout().flush().unwrap();
+                            tab_count = 1;
+                        } else {
+                            let options = matches.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("  ");
+                            print!("\n{}\n$ {}", options, buffer);
+                            io::stdout().flush().unwrap();
+                            tab_count = 0;
+                        }
                     }
                 }
             }
