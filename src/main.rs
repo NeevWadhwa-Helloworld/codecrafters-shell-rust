@@ -263,7 +263,6 @@ fn longest_common_prefix(strs: &[&String]) -> String {
     prefix
 }
 
-// Runs completer script passing arguments and setting COMP_LINE / COMP_POINT environment variables
 fn run_completer_script(
     script_path: &str,
     command_name: &str,
@@ -285,11 +284,14 @@ fn run_completer_script(
     }
 
     let stdout_str = String::from_utf8(output.stdout).ok()?;
-    let lines: Vec<String> = stdout_str
+    let mut lines: Vec<String> = stdout_str
         .lines()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect();
+
+    lines.sort();
+    lines.dedup();
 
     Some(lines)
 }
@@ -337,21 +339,44 @@ fn read_line_with_completion(completion_specs: &BTreeMap<String, String>) -> Str
                             previous_word_str,
                             &buffer,
                         ) {
-                            if let Some(first_line) = script_lines.first() {
+                            let match_refs: Vec<&String> = script_lines.iter().collect();
+
+                            if match_refs.is_empty() {
+                                print!("\x07");
+                                io::stdout().flush().unwrap();
+                                tab_count = 0;
+                            } else if match_refs.len() == 1 {
+                                let matched_str = match_refs[0];
                                 let last_space_idx = buffer.rfind(' ').unwrap();
                                 let base_prefix = &buffer[..=last_space_idx];
-                                let completed = format!("{}{}{} ", base_prefix, first_line, if first_line.ends_with('/') { "" } else { "" });
+                                let completed = format!("{}{}{} ", base_prefix, matched_str, if matched_str.ends_with('/') { "" } else { "" });
                                 print!("\r$ {}\x1b[K", completed);
                                 io::stdout().flush().unwrap();
                                 buffer = completed;
                                 tab_count = 0;
-                                continue;
                             } else {
-                                print!("\x07");
-                                io::stdout().flush().unwrap();
-                                tab_count = 0;
-                                continue;
+                                let lcp = longest_common_prefix(&match_refs);
+
+                                if lcp.len() > word_being_completed.len() {
+                                    let last_space_idx = buffer.rfind(' ').unwrap();
+                                    let base_prefix = &buffer[..=last_space_idx];
+                                    let completed = format!("{}{}", base_prefix, lcp);
+                                    print!("\r$ {}\x1b[K", completed);
+                                    io::stdout().flush().unwrap();
+                                    buffer = completed;
+                                    tab_count = 0;
+                                } else if tab_count == 0 {
+                                    print!("\x07");
+                                    io::stdout().flush().unwrap();
+                                    tab_count = 1;
+                                } else {
+                                    let options = match_refs.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("  ");
+                                    print!("\n{}\n$ {}", options, buffer);
+                                    io::stdout().flush().unwrap();
+                                    tab_count = 0;
+                                }
                             }
+                            continue;
                         }
                     }
 
