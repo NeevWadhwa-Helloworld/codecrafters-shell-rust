@@ -193,6 +193,24 @@ fn get_all_completions() -> Vec<String> {
     completions.into_iter().collect()
 }
 
+// Finds the longest common prefix among a list of matching strings
+fn longest_common_prefix(strs: &[&String]) -> String {
+    if strs.is_empty() {
+        return String::new();
+    }
+
+    let mut prefix = strs[0].to_string();
+    for s in &strs[1..] {
+        while !s.starts_with(&prefix) {
+            prefix.pop();
+            if prefix.is_empty() {
+                break;
+            }
+        }
+    }
+    prefix
+}
+
 fn read_line_with_completion() -> String {
     let mut buffer = String::new();
     let mut stdin = io::stdin();
@@ -209,25 +227,37 @@ fn read_line_with_completion() -> String {
                 let candidates = get_all_completions();
                 let matches: Vec<&String> = candidates.iter().filter(|c| c.starts_with(&buffer)).collect();
 
-                if matches.len() == 1 {
+                if matches.is_empty() {
+                    print!("\x07");
+                    io::stdout().flush().unwrap();
+                    tab_count = 0;
+                } else if matches.len() == 1 {
                     let completed = format!("{} ", matches[0]);
-                    print!("\r$ {}", completed);
+                    print!("\r$ {}\x1b[K", completed);
                     io::stdout().flush().unwrap();
                     buffer = completed;
                     tab_count = 0;
-                } else if matches.is_empty() {
-                    print!("\x07");
-                    io::stdout().flush().unwrap();
-                    tab_count = 0;
-                } else if tab_count == 0 {
-                    print!("\x07");
-                    io::stdout().flush().unwrap();
-                    tab_count = 1;
                 } else {
-                    let options = matches.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("  ");
-                    print!("\n{}\n$ {}", options, buffer);
-                    io::stdout().flush().unwrap();
-                    tab_count = 0;
+                    let lcp = longest_common_prefix(&matches);
+                    
+                    // If the longest common prefix is longer than what's currently in the buffer, autocomplete to it
+                    if lcp.len() > buffer.len() {
+                        print!("\r$ {}\x1b[K", lcp);
+                        io::stdout().flush().unwrap();
+                        buffer = lcp;
+                        tab_count = 0;
+                    } else if tab_count == 0 {
+                        // First TAB press when LCP cannot extend further: ring the bell
+                        print!("\x07");
+                        io::stdout().flush().unwrap();
+                        tab_count = 1;
+                    } else {
+                        // Second TAB press: print all matching candidates separated by two spaces
+                        let options = matches.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("  ");
+                        print!("\n{}\n$ {}", options, buffer);
+                        io::stdout().flush().unwrap();
+                        tab_count = 0;
+                    }
                 }
             }
             b'\n' | b'\r' => {
