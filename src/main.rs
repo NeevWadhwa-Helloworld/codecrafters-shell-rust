@@ -196,6 +196,7 @@ fn get_all_completions() -> Vec<String> {
 fn read_line_with_completion() -> String {
     let mut buffer = String::new();
     let mut stdin = io::stdin();
+    let mut tab_count = 0;
 
     loop {
         let mut byte = [0u8; 1];
@@ -207,14 +208,26 @@ fn read_line_with_completion() -> String {
             b'\t' => {
                 let candidates = get_all_completions();
                 let matches: Vec<&String> = candidates.iter().filter(|c| c.starts_with(&buffer)).collect();
+
                 if matches.len() == 1 {
                     let completed = format!("{} ", matches[0]);
                     print!("\r$ {}", completed);
                     io::stdout().flush().unwrap();
                     buffer = completed;
-                } else {
+                    tab_count = 0;
+                } else if matches.is_empty() {
                     print!("\x07");
                     io::stdout().flush().unwrap();
+                    tab_count = 0;
+                } else if tab_count == 0 {
+                    print!("\x07");
+                    io::stdout().flush().unwrap();
+                    tab_count = 1;
+                } else {
+                    let options = matches.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("  ");
+                    print!("\n{}\n$ {}", options, buffer);
+                    io::stdout().flush().unwrap();
+                    tab_count = 0;
                 }
             }
             b'\n' | b'\r' => {
@@ -222,6 +235,7 @@ fn read_line_with_completion() -> String {
                 break;
             }
             127 | 8 => {
+                tab_count = 0;
                 if !buffer.is_empty() {
                     buffer.pop();
                     print!("\r$ {}\x1b[K", buffer);
@@ -229,6 +243,7 @@ fn read_line_with_completion() -> String {
                 }
             }
             b => {
+                tab_count = 0;
                 buffer.push(b as char);
                 print!("{}", b as char);
                 io::stdout().flush().unwrap();
