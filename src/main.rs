@@ -24,32 +24,22 @@ struct Job {
     child: Child,
 }
 
-// Added: Helper function to check and reap completed background jobs
-// Non-blockingly checks child processes with try_wait() and prints 'Done' status for exited jobs
+// Helper function to check and reap completed background jobs
 fn reap_jobs(jobs: &mut Vec<Job>) {
-    let total_jobs = jobs.len();
     let mut remaining_jobs = Vec::new();
 
-    // Drain jobs vector to inspect each job while retaining ownership
-    for (idx, mut job) in std::mem::take(jobs).into_iter().enumerate() {
-        let marker = if idx == total_jobs - 1 {
-            '+'
-        } else if idx == total_jobs - 2 {
-            '-'
-        } else {
-            ' '
-        };
-
+    // Draining jobs to check execution status with try_wait()
+    for mut job in std::mem::take(jobs) {
         let is_finished = match job.child.try_wait() {
             Ok(Some(_status)) => true,
             _ => false,
         };
 
         if is_finished {
-            // Format status as "Done" and remove trailing '&' from command string
+            // Fixed: Done jobs take a space marker ' ' so they don't corrupt markers for remaining jobs
             let status_padded = format!("{:24}", "Done");
             let display_cmd = job.command.trim_end_matches('&').trim_end();
-            println!("[{}]{} {}  {}", job.id, marker, status_padded, display_cmd);
+            println!("[{}]  {}  {}", job.id, status_padded, display_cmd);
         } else {
             remaining_jobs.push(job);
         }
@@ -70,7 +60,7 @@ fn main() {
     let mut jobs: Vec<Job> = Vec::new();
 
     loop {
-        // Added: Reaping before each prompt - checks and prints finished background jobs
+        // Reaping before each prompt - checks and prints finished background jobs
         reap_jobs(&mut jobs);
 
         print!("$ ");
@@ -217,9 +207,10 @@ fn main() {
                 }
             }
         } else if cmd == "jobs" {
-            // Added: Reap completed jobs first before printing active background jobs
+            // Reap completed jobs first before printing active background jobs
             reap_jobs(&mut jobs);
 
+            // Fixed: Calculate job markers (+, -) ONLY among remaining active running jobs
             let total_jobs = jobs.len();
             for (idx, job) in jobs.iter().enumerate() {
                 let marker = if idx == total_jobs - 1 {
