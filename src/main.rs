@@ -205,10 +205,11 @@ fn main() {
             if is_background {
                 if let Ok(child) = child_cmd.spawn() {
                     let pid = child.id();
+                    println!("[{} prob]", next_job_number);
                     println!("[{}] {}", next_job_number, pid);
 
-                    // Added: Save the full command string with trailing '&' to the jobs list
-                    let raw_cmd_string = format!("{} &", command.trim_end());
+                    // Fixed: Save the typed command string directly as it already includes the trailing '&'
+                    let raw_cmd_string = command.trim_end().to_string();
                     jobs.push(Job {
                         id: next_job_number,
                         pid,
