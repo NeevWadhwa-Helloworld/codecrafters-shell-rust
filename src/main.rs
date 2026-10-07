@@ -20,6 +20,9 @@ fn main() {
     enable_raw_mode();
 
     let mut completion_specs: BTreeMap<String, String> = BTreeMap::new();
+    
+    // Track sequential job numbers for background processes
+    let mut next_job_number = 1;
 
     loop {
         print!("$ ");
@@ -70,6 +73,16 @@ fn main() {
                 clean_parts.push(parts[i].clone());
                 i += 1;
             }
+        }
+
+        if clean_parts.is_empty() {
+            continue;
+        }
+
+        // Check if the command line ends with '&' token to run in background
+        let is_background = clean_parts.last().map(|s| s.as_str()) == Some("&");
+        if is_background {
+            clean_parts.pop();
         }
 
         if clean_parts.is_empty() {
@@ -127,7 +140,6 @@ fn main() {
             }
         } else if cmd == "type" {
             if let Some(cmd_arg) = args.first() {
-                // Updated: Register 'jobs' as a recognized shell builtin for 'type' command
                 if cmd_arg == "echo" || cmd_arg == "type" || cmd_arg == "exit" || cmd_arg == "pwd" || cmd_arg == "complete" || cmd_arg == "jobs" {
                     write_stdout(&format!("{} is a shell builtin", cmd_arg));
                 } else if let Some(path) = get_executable_path(cmd_arg) {
@@ -157,7 +169,6 @@ fn main() {
                 }
             }
         } else if cmd == "jobs" {
-            // Updated: Empty implementation for 'jobs' builtin as specified for this stage
         } else if let Some(_path) = get_executable_path(cmd) {
             let mut child_cmd = Command::new(cmd);
             child_cmd.args(args);
@@ -174,7 +185,16 @@ fn main() {
                 }
             }
 
-            let _ = child_cmd.status();
+            // Spawn non-blocking background process if '&' token was present
+            if is_background {
+                if let Ok(child) = child_cmd.spawn() {
+                    let pid = child.id();
+                    println!("[{}] {}", next_job_number, pid);
+                    next_job_number += 1;
+                }
+            } else {
+                let _ = child_cmd.status();
+            }
         } else {
             write_stderr(&format!("{}: command not found", cmd));
         }
@@ -187,7 +207,6 @@ fn get_executable_completions() -> Vec<String> {
     completions.insert("echo".to_string());
     completions.insert("exit".to_string());
     completions.insert("complete".to_string());
-    // Updated: Include 'jobs' in tab autocompletions
     completions.insert("jobs".to_string());
 
     if let Some(path_var) = std::env::var_os("PATH") {
