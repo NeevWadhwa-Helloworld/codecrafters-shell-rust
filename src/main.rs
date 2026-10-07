@@ -16,49 +16,12 @@ struct Redirection {
     mode: RedirectMode,
 }
 
-// Struct to store background job details (job id, process id, command string, child process handle)
+// Added: Struct to store background job details (job id, process id, command string, child process handle)
 struct Job {
     id: usize,
     pid: u32,
     command: String,
     child: Child,
-}
-
-// Added/Updated: Helper function to check and reap completed background jobs using a custom writer closure
-fn reap_jobs_with_writer<F>(jobs: &mut Vec<Job>, mut write_line: F)
-where
-    F: FnMut(&str),
-{
-    let total_jobs = jobs.len();
-    let mut remaining_jobs = Vec::new();
-
-    // Draining jobs to check execution status with try_wait()
-    for (idx, mut job) in std::mem::take(jobs).into_iter().enumerate() {
-        // Calculate marker based on the job's position among current jobs before removal
-        let marker = if idx == total_jobs - 1 {
-            '+'
-        } else if idx == total_jobs - 2 {
-            '-'
-        } else {
-            ' '
-        };
-
-        let is_finished = match job.child.try_wait() {
-            Ok(Some(_status)) => true,
-            _ => false,
-        };
-
-        if is_finished {
-            // Print status as "Done" with its corresponding marker (+) or (-) when reaped
-            let status_padded = format!("{:24}", "Done");
-            let display_cmd = job.command.trim_end_matches('&').trim_end();
-            write_line(&format!("[{}]{} {}  {}", job.id, marker, status_padded, display_cmd));
-        } else {
-            remaining_jobs.push(job);
-        }
-    }
-
-    *jobs = remaining_jobs;
 }
 
 fn main() {
@@ -69,13 +32,10 @@ fn main() {
     // Track sequential job numbers for background processes
     let mut next_job_number = 1;
 
-    // List to track active background jobs
+    // Added: List to track active background jobs
     let mut jobs: Vec<Job> = Vec::new();
 
     loop {
-        // Reaping before each prompt - checks and prints finished background jobs to standard stdout
-        reap_jobs_with_writer(&mut jobs, |line| println!("{}", line));
-
         print!("$ ");
         io::stdout().flush().unwrap();
 
@@ -220,12 +180,11 @@ fn main() {
                 }
             }
         } else if cmd == "jobs" {
-            // Reap completed jobs first using write_stdout so redirected outputs work properly
-            reap_jobs_with_writer(&mut jobs, |line| write_stdout(line));
-
-            // Calculate markers for remaining active running jobs
+            // Added: Non-blockingly check each child process using try_wait() to reap finished jobs
             let total_jobs = jobs.len();
-            for (idx, job) in jobs.iter().enumerate() {
+            let mut remaining_jobs = Vec::new();
+
+            for (idx, mut job) in jobs.into_iter().enumerate() {
                 let marker = if idx == total_jobs - 1 {
                     '+'
                 } else if idx == total_jobs - 2 {
@@ -234,9 +193,25 @@ fn main() {
                     ' '
                 };
 
-                let status_padded = format!("{:24}", "Running");
-                write_stdout(&format!("[{}]{} {}  {}", job.id, marker, status_padded, job.command));
+                let is_finished = match job.child.try_wait() {
+                    Ok(Some(_status)) => true,
+                    _ => false,
+                };
+
+                if is_finished {
+                    // Added: Format status as "Done" and remove trailing '&' from command string
+                    let status_padded = format!("{:24}", "Done");
+                    let display_cmd = job.command.trim_end_matches('&').trim_end();
+                    write_stdout(&format!("[{}]{} {}  {}", job.id, marker, status_padded, display_cmd));
+                } else {
+                    // Added: Job is still running, list status and keep in jobs list
+                    let status_padded = format!("{:24}", "Running");
+                    write_stdout(&format!("[{}]{} {}  {}", job.id, marker, status_padded, job.command));
+                    remaining_jobs.push(job);
+                }
             }
+
+            jobs = remaining_jobs;
         } else if let Some(_path) = get_executable_path(cmd) {
             let mut child_cmd = Command::new(cmd);
             child_cmd.args(args);
@@ -259,6 +234,7 @@ fn main() {
                     let pid = child.id();
                     println!("[{}] {}", next_job_number, pid);
 
+                    // Fixed: Save the typed command string directly as it already includes the trailing '&'
                     let raw_cmd_string = command.trim_end().to_string();
                     jobs.push(Job {
                         id: next_job_number,
