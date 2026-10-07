@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 
 #[derive(Clone, Copy, PartialEq)]
 enum RedirectMode {
@@ -16,12 +16,12 @@ struct Redirection {
     mode: RedirectMode,
 }
 
-// Added: Struct to store background job details (job id, process id, command string, status)
+// Added: Struct to store background job details (job id, process id, command string, child process handle)
 struct Job {
     id: usize,
     pid: u32,
     command: String,
-    status: String,
+    child: Child,
 }
 
 fn main() {
@@ -180,9 +180,11 @@ fn main() {
                 }
             }
         } else if cmd == "jobs" {
-            // Updated: Dynamically assign markers '+' (current/most recent), '-' (previous), or ' ' (others)
+            // Added: Non-blockingly check each child process using try_wait() to reap finished jobs
             let total_jobs = jobs.len();
-            for (idx, job) in jobs.iter().enumerate() {
+            let mut remaining_jobs = Vec::new();
+
+            for (idx, mut job) in jobs.into_iter().enumerate() {
                 let marker = if idx == total_jobs - 1 {
                     '+'
                 } else if idx == total_jobs - 2 {
@@ -191,9 +193,25 @@ fn main() {
                     ' '
                 };
 
-                let status_padded = format!("{:24}", job.status);
-                write_stdout(&format!("[{}]{} {}  {}", job.id, marker, status_padded, job.command));
+                let is_finished = match job.child.try_wait() {
+                    Ok(Some(_status)) => true,
+                    _ => false,
+                };
+
+                if is_finished {
+                    // Added: Format status as "Done" and remove trailing '&' from command string
+                    let status_padded = format!("{:24}", "Done");
+                    let display_cmd = job.command.trim_end_matches('&').trim_end();
+                    write_stdout(&format!("[{}]{} {}  {}", job.id, marker, status_padded, display_cmd));
+                } else {
+                    // Added: Job is still running, list status and keep in jobs list
+                    let status_padded = format!("{:24}", "Running");
+                    write_stdout(&format!("[{}]{} {}  {}", job.id, marker, status_padded, job.command));
+                    remaining_jobs.push(job);
+                }
             }
+
+            jobs = remaining_jobs;
         } else if let Some(_path) = get_executable_path(cmd) {
             let mut child_cmd = Command::new(cmd);
             child_cmd.args(args);
@@ -222,7 +240,7 @@ fn main() {
                         id: next_job_number,
                         pid,
                         command: raw_cmd_string,
-                        status: "Running".to_string(),
+                        child,
                     });
 
                     next_job_number += 1;
