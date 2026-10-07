@@ -205,7 +205,6 @@ fn main() {
             if is_background {
                 if let Ok(child) = child_cmd.spawn() {
                     let pid = child.id();
-                    println!("[{} prob]", next_job_number);
                     println!("[{}] {}", next_job_number, pid);
 
                     // Fixed: Save the typed command string directly as it already includes the trailing '&'
