@@ -180,10 +180,19 @@ fn main() {
                 }
             }
         } else if cmd == "jobs" {
-            // Added: Print background jobs in the formatted structure: "[id]+ Status (padded to 24 chars)  command"
-            for job in &jobs {
+            // Updated: Dynamically assign markers '+' (current/most recent), '-' (previous), or ' ' (others)
+            let total_jobs = jobs.len();
+            for (idx, job) in jobs.iter().enumerate() {
+                let marker = if idx == total_jobs - 1 {
+                    '+'
+                } else if idx == total_jobs - 2 {
+                    '-'
+                } else {
+                    ' '
+                };
+
                 let status_padded = format!("{:24}", job.status);
-                write_stdout(&format!("[{}]+ {}  {}", job.id, status_padded, job.command));
+                write_stdout(&format!("[{}]{} {}  {}", job.id, marker, status_padded, job.command));
             }
         } else if let Some(_path) = get_executable_path(cmd) {
             let mut child_cmd = Command::new(cmd);
