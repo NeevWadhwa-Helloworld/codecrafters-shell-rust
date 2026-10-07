@@ -127,7 +127,8 @@ fn main() {
             }
         } else if cmd == "type" {
             if let Some(cmd_arg) = args.first() {
-                if cmd_arg == "echo" || cmd_arg == "type" || cmd_arg == "exit" || cmd_arg == "pwd" || cmd_arg == "complete" {
+                // Updated: Register 'jobs' as a recognized shell builtin for 'type' command
+                if cmd_arg == "echo" || cmd_arg == "type" || cmd_arg == "exit" || cmd_arg == "pwd" || cmd_arg == "complete" || cmd_arg == "jobs" {
                     write_stdout(&format!("{} is a shell builtin", cmd_arg));
                 } else if let Some(path) = get_executable_path(cmd_arg) {
                     write_stdout(&format!("{} is {}", cmd_arg, path.display()));
@@ -155,6 +156,8 @@ fn main() {
                     completion_specs.remove(target_cmd);
                 }
             }
+        } else if cmd == "jobs" {
+            // Updated: Empty implementation for 'jobs' builtin as specified for this stage
         } else if let Some(_path) = get_executable_path(cmd) {
             let mut child_cmd = Command::new(cmd);
             child_cmd.args(args);
@@ -184,6 +187,8 @@ fn get_executable_completions() -> Vec<String> {
     completions.insert("echo".to_string());
     completions.insert("exit".to_string());
     completions.insert("complete".to_string());
+    // Updated: Include 'jobs' in tab autocompletions
+    completions.insert("jobs".to_string());
 
     if let Some(path_var) = std::env::var_os("PATH") {
         for path in std::env::split_paths(&path_var) {
