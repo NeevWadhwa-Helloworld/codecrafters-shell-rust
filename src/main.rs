@@ -16,6 +16,14 @@ struct Redirection {
     mode: RedirectMode,
 }
 
+// Added: Struct to store background job details (job id, process id, command string, status)
+struct Job {
+    id: usize,
+    pid: u32,
+    command: String,
+    status: String,
+}
+
 fn main() {
     enable_raw_mode();
 
@@ -23,6 +31,9 @@ fn main() {
     
     // Track sequential job numbers for background processes
     let mut next_job_number = 1;
+
+    // Added: List to track active background jobs
+    let mut jobs: Vec<Job> = Vec::new();
 
     loop {
         print!("$ ");
@@ -169,6 +180,11 @@ fn main() {
                 }
             }
         } else if cmd == "jobs" {
+            // Added: Print background jobs in the formatted structure: "[id]+ Status (padded to 24 chars)  command"
+            for job in &jobs {
+                let status_padded = format!("{:24}", job.status);
+                write_stdout(&format!("[{}]+ {}  {}", job.id, status_padded, job.command));
+            }
         } else if let Some(_path) = get_executable_path(cmd) {
             let mut child_cmd = Command::new(cmd);
             child_cmd.args(args);
@@ -190,6 +206,16 @@ fn main() {
                 if let Ok(child) = child_cmd.spawn() {
                     let pid = child.id();
                     println!("[{}] {}", next_job_number, pid);
+
+                    // Added: Save the full command string with trailing '&' to the jobs list
+                    let raw_cmd_string = format!("{} &", command.trim_end());
+                    jobs.push(Job {
+                        id: next_job_number,
+                        pid,
+                        command: raw_cmd_string,
+                        status: "Running".to_string(),
+                    });
+
                     next_job_number += 1;
                 }
             } else {
