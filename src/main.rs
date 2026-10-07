@@ -24,8 +24,11 @@ struct Job {
     child: Child,
 }
 
-// Helper function to check and reap completed background jobs
-fn reap_jobs(jobs: &mut Vec<Job>) {
+// Added/Updated: Helper function to check and reap completed background jobs using a custom writer closure
+fn reap_jobs_with_writer<F>(jobs: &mut Vec<Job>, mut write_line: F)
+where
+    F: FnMut(&str),
+{
     let total_jobs = jobs.len();
     let mut remaining_jobs = Vec::new();
 
@@ -49,7 +52,7 @@ fn reap_jobs(jobs: &mut Vec<Job>) {
             // Print status as "Done" with its corresponding marker (+) or (-) when reaped
             let status_padded = format!("{:24}", "Done");
             let display_cmd = job.command.trim_end_matches('&').trim_end();
-            println!("[{}]{} {}  {}", job.id, marker, status_padded, display_cmd);
+            write_line(&format!("[{}]{} {}  {}", job.id, marker, status_padded, display_cmd));
         } else {
             remaining_jobs.push(job);
         }
@@ -70,8 +73,8 @@ fn main() {
     let mut jobs: Vec<Job> = Vec::new();
 
     loop {
-        // Reaping before each prompt - checks and prints finished background jobs with markers
-        reap_jobs(&mut jobs);
+        // Reaping before each prompt - checks and prints finished background jobs to standard stdout
+        reap_jobs_with_writer(&mut jobs, |line| println!("{}", line));
 
         print!("$ ");
         io::stdout().flush().unwrap();
@@ -217,8 +220,8 @@ fn main() {
                 }
             }
         } else if cmd == "jobs" {
-            // Reap completed jobs first before printing active running jobs
-            reap_jobs(&mut jobs);
+            // Reap completed jobs first using write_stdout so redirected outputs work properly
+            reap_jobs_with_writer(&mut jobs, |line| write_stdout(line));
 
             // Calculate markers for remaining active running jobs
             let total_jobs = jobs.len();
