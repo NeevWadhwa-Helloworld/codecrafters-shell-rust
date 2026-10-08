@@ -77,6 +77,109 @@ fn main() {
         }
 
         let parts = parse_command_line(command);
+
+        // Pipeline handling (|)
+        if parts.contains(&"|".to_string()) {
+            let stages: Vec<Vec<String>> = parts
+                .split(|p| p == "|")
+                .map(|s| s.to_vec())
+                .collect();
+
+            let total_stages = stages.len();
+            let mut children = Vec::new();
+            let mut prev_stdout: Option<Stdio> = None;
+
+            for (idx, stage) in stages.iter().enumerate() {
+                let is_first = idx == 0;
+                let is_last = idx == total_stages - 1;
+
+                // Parse redirections per stage
+                let mut stdout_redir: Option<Redirection> = None;
+                let mut stderr_redir: Option<Redirection> = None;
+                let mut clean_stage = Vec::new();
+
+                let mut i = 0;
+                while i < stage.len() {
+                    if (stage[i] == ">>" || stage[i] == "1>>") && i + 1 < stage.len() {
+                        stdout_redir = Some(Redirection {
+                            path: stage[i + 1].clone(),
+                            mode: RedirectMode::Append,
+                        });
+                        i += 2;
+                    } else if (stage[i] == ">" || stage[i] == "1>") && i + 1 < stage.len() {
+                        stdout_redir = Some(Redirection {
+                            path: stage[i + 1].clone(),
+                            mode: RedirectMode::Overwrite,
+                        });
+                        i += 2;
+                    } else if stage[i] == "2>>" && i + 1 < stage.len() {
+                        stderr_redir = Some(Redirection {
+                            path: stage[i + 1].clone(),
+                            mode: RedirectMode::Append,
+                        });
+                        i += 2;
+                    } else if stage[i] == "2>" && i + 1 < stage.len() {
+                        stderr_redir = Some(Redirection {
+                            path: stage[i + 1].clone(),
+                            mode: RedirectMode::Overwrite,
+                        });
+                        i += 2;
+                    } else {
+                        clean_stage.push(stage[i].clone());
+                        i += 1;
+                    }
+                }
+
+                if clean_stage.is_empty() {
+                    continue;
+                }
+
+                let cmd = &clean_stage[0];
+                let args = &clean_stage[1..];
+
+                let mut child_cmd = Command::new(cmd);
+                child_cmd.args(args);
+
+                // Pipe input from previous stage
+                if is_first {
+                    child_cmd.stdin(Stdio::inherit());
+                } else if let Some(prev) = prev_stdout.take() {
+                    child_cmd.stdin(prev);
+                }
+
+                // Pipe output to next stage or redirect stdout
+                if !is_last {
+                    child_cmd.stdout(Stdio::piped());
+                } else if let Some(ref redir) = stdout_redir {
+                    if let Ok(file) = open_file_for_redir(redir) {
+                        child_cmd.stdout(Stdio::from(file));
+                    }
+                }
+
+                if let Some(ref redir) = stderr_redir {
+                    if let Ok(file) = open_file_for_redir(redir) {
+                        child_cmd.stderr(Stdio::from(file));
+                    }
+                }
+
+                if let Ok(mut child) = child_cmd.spawn() {
+                    if !is_last {
+                        if let Some(out) = child.stdout.take() {
+                            prev_stdout = Some(Stdio::from(out));
+                        }
+                    }
+                    children.push(child);
+                }
+            }
+
+            // Wait for pipeline commands to complete
+            for mut child in children {
+                let _ = child.wait();
+            }
+
+            continue;
+        }
+
         if parts.is_empty() {
             continue;
         }
@@ -152,7 +255,7 @@ fn main() {
         };
 
         let write_stderr = |output: &str| {
-            if let Some(ref redir) = stdout_redir {
+            if let Some(ref redir) = stderr_redir {
                 if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(&redir.path) {
                     let _ = writeln!(file, "{}", output);
                 }
