@@ -5,6 +5,11 @@ use std::io::{self, Read, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
+#[cfg(unix)]
+use std::os::fd::OwnedFd;
+
+use std::os::unix::net::UnixStream;
+
 #[derive(Clone, Copy, PartialEq)]
 enum RedirectMode {
     Overwrite,
@@ -267,17 +272,17 @@ fn main() {
                     child_cmd.args(args);
 
                     if let Some(reader) = prev_reader.take() {
-                        child_cmd.stdin(Stdio::from(reader));
+                        child_cmd.stdin(Stdio::from(OwnedFd::from(reader)));
                     } else {
                         child_cmd.stdin(Stdio::inherit());
                     }
 
                     if let Some(ref redir) = stdout_redir {
                         if let Ok(file) = open_file_for_redir(redir) {
-                            child_cmd.stdout(Stdio::from(file));
+                            child_cmd.stdout(Stdio::from(OwnedFd::from(file)));
                         }
                     } else if let Some(writer) = next_writer {
-                        child_cmd.stdout(Stdio::from(writer));
+                        child_cmd.stdout(Stdio::from(OwnedFd::from(writer)));
                     }
 
                     if let Some(ref redir) = stderr_redir {
