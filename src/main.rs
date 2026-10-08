@@ -59,9 +59,6 @@ fn main() {
     enable_raw_mode();
 
     let mut completion_specs: BTreeMap<String, String> = BTreeMap::new();
-    
-    // Track sequential job numbers for background processes
-    let mut next_job_number = 1;
 
     // List to track active background jobs
     let mut jobs: Vec<Job> = Vec::new();
@@ -261,20 +258,27 @@ fn main() {
             }
 
             // Spawn non-blocking background process if '&' token was present
+            // Spawn non-blocking background process if '&' token was present
             if is_background {
                 if let Ok(child) = child_cmd.spawn() {
                     let pid = child.id();
-                    println!("[{}] {}", next_job_number, pid);
+                    
+                    // Assign [1] if empty, otherwise 1 + the highest current job ID
+                    let job_id = if jobs.is_empty() {
+                        1
+                    } else {
+                        jobs.iter().map(|j| j.id).max().unwrap_or(0) + 1
+                    };
+
+                    println!("[{}] {}", job_id, pid);
 
                     let raw_cmd_string = command.trim_end().to_string();
                     jobs.push(Job {
-                        id: next_job_number,
+                        id: job_id,
                         pid,
                         command: raw_cmd_string,
                         child,
                     });
-
-                    next_job_number += 1;
                 }
             } else {
                 let _ = child_cmd.status();
