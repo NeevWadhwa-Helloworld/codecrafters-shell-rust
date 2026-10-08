@@ -214,12 +214,10 @@ fn main() {
                 }
             }
         } else if cmd == "jobs" {
-            // Reap any newly finished jobs first
-            reap_jobs(&mut jobs);
-
-            // Display remaining active running jobs
             let total_jobs = jobs.len();
-            for (idx, job) in jobs.iter().enumerate() {
+            let mut remaining_jobs = Vec::new();
+
+            for (idx, mut job) in std::mem::take(&mut jobs).into_iter().enumerate() {
                 let marker = if idx == total_jobs - 1 {
                     '+'
                 } else if idx == total_jobs - 2 {
@@ -228,9 +226,24 @@ fn main() {
                     ' '
                 };
 
-                let status_padded = format!("{:24}", "Running");
-                write_stdout(&format!("[{}]{} {}  {}", job.id, marker, status_padded, job.command));
+                let is_finished = match job.child.try_wait() {
+                    Ok(Some(_status)) => true,
+                    _ => false,
+                };
+
+                if is_finished {
+                    let status_padded = format!("{:24}", "Done");
+                    let display_cmd = job.command.trim_end_matches('&').trim_end();
+                    write_stdout(&format!("[{}]{} {}  {}", job.id, marker, status_padded, display_cmd));
+                } else {
+                    let status_padded = format!("{:24}", "Running");
+                    write_stdout(&format!("[{}]{} {}  {}", job.id, marker, status_padded, job.command));
+                    remaining_jobs.push(job);
+                }
             }
+            
+            // Retain only the jobs that are still running
+            jobs = remaining_jobs;
         } else if let Some(_path) = get_executable_path(cmd) {
             let mut child_cmd = Command::new(cmd);
             child_cmd.args(args);
