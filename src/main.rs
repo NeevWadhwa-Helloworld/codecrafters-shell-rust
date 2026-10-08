@@ -55,6 +55,101 @@ fn reap_jobs(jobs: &mut Vec<Job>) {
     *jobs = remaining_jobs;
 }
 
+fn is_builtin(cmd: &str) -> bool {
+    matches!(cmd, "echo" | "pwd" | "cd" | "type" | "complete" | "jobs" | "exit")
+}
+
+fn execute_builtin(
+    cmd: &str,
+    args: &[String],
+    completion_specs: &mut BTreeMap<String, String>,
+    jobs: &mut Vec<Job>,
+    out: &mut dyn Write,
+    err_out: &mut dyn Write,
+) {
+    if cmd == "echo" {
+        let _ = writeln!(out, "{}", args.join(" "));
+    } else if cmd == "pwd" {
+        if let Ok(current_dir) = std::env::current_dir() {
+            let _ = writeln!(out, "{}", current_dir.display());
+        }
+    } else if cmd == "cd" {
+        let target = match args.first().map(|s| s.as_str()) {
+            Some("~") | None => std::env::var("HOME").ok(),
+            Some(path) => Some(path.to_string()),
+        };
+        if let Some(target_path) = target {
+            if let Err(_) = std::env::set_current_dir(&target_path) {
+                let _ = writeln!(err_out, "cd: {}: No such file or directory", target_path);
+            }
+        }
+    } else if cmd == "type" {
+        if let Some(cmd_arg) = args.first() {
+            if is_builtin(cmd_arg) {
+                let _ = writeln!(out, "{} is a shell builtin", cmd_arg);
+            } else if let Some(path) = get_executable_path(cmd_arg) {
+                let _ = writeln!(out, "{} is {}", cmd_arg, path.display());
+            } else {
+                let _ = writeln!(out, "{}: not found", cmd_arg);
+            }
+        }
+    } else if cmd == "complete" {
+        if args.first().map(|s| s.as_str()) == Some("-C") {
+            if args.len() >= 3 {
+                let script_path = &args[1];
+                let target_cmd = &args[2];
+                completion_specs.insert(target_cmd.clone(), script_path.clone());
+            }
+        } else if args.first().map(|s| s.as_str()) == Some("-p") {
+            if let Some(target_cmd) = args.get(1) {
+                if let Some(script_path) = completion_specs.get(target_cmd) {
+                    let _ = writeln!(out, "complete -C '{}' {}", script_path, target_cmd);
+                } else {
+                    let _ = writeln!(err_out, "complete: {}: no completion specification", target_cmd);
+                }
+            }
+        } else if args.first().map(|s| s.as_str()) == Some("-r") {
+            if let Some(target_cmd) = args.get(1) {
+                completion_specs.remove(target_cmd);
+            }
+        }
+    } else {
+        execute_builtin(cmd, args, completion_specs, jobs, out, err_out);
+    }
+} else if cmd == "jobs" {
+        let total_jobs = jobs.len();
+        let mut remaining_jobs = Vec::new();
+
+        for (idx, mut job) in std::mem::take(jobs).into_iter().enumerate() {
+            let marker = if idx == total_jobs - 1 {
+                '+'
+            } else if idx == total_jobs - 2 {
+                '-'
+            } else {
+                ' '
+            };
+
+            let is_finished = match job.child.try_wait() {
+                Ok(Some(_status)) => true,
+                _ => false,
+            };
+
+            if is_finished {
+                let status_padded = format!("{:24}", "Done");
+                let display_cmd = job.command.trim_end_matches('&').trim_end();
+                let _ = writeln!(out, "[{}]{} {}  {}", job.id, marker, status_padded, display_cmd);
+            } else {
+                let status_padded = format!("{:24}", "Running");
+                let _ = writeln!(out, "[{}]{} {}  {}", job.id, marker, status_padded, job.command);
+                remaining_jobs.push(job);
+            }
+        }
+        *jobs = remaining_jobs;
+    } else if cmd == "exit" {
+        std::process::exit(0);
+    }
+}
+
 fn main() {
     enable_raw_mode();
 
@@ -78,7 +173,7 @@ fn main() {
 
         let parts = parse_command_line(command);
 
-        // Pipeline handling (|)
+        // Pipeline handling (|) with built-in support
         if parts.contains(&"|".to_string()) {
             let stages: Vec<Vec<String>> = parts
                 .split(|p| p == "|")
@@ -87,13 +182,11 @@ fn main() {
 
             let total_stages = stages.len();
             let mut children = Vec::new();
-            let mut prev_stdout: Option<Stdio> = None;
+            let mut prev_reader: Option<std::os::unix::net::UnixStream> = None;
 
             for (idx, stage) in stages.iter().enumerate() {
-                let is_first = idx == 0;
                 let is_last = idx == total_stages - 1;
 
-                // Parse redirections per stage
                 let mut stdout_redir: Option<Redirection> = None;
                 let mut stderr_redir: Option<Redirection> = None;
                 let mut clean_stage = Vec::new();
@@ -134,45 +227,78 @@ fn main() {
                     continue;
                 }
 
-                let cmd = &clean_stage[0];
+                let cmd = clean_stage[0].as_str();
                 let args = &clean_stage[1..];
 
-                let mut child_cmd = Command::new(cmd);
-                child_cmd.args(args);
+                // Create standard pipe stream pair for downstream stage
+                let (next_reader, next_writer) = if !is_last {
+                    let (r, w) = std::os::unix::net::UnixStream::pair().unwrap();
+                    (Some(r), Some(w))
+                } else {
+                    (None, None)
+                };
 
-                // Pipe input from previous stage
-                if is_first {
-                    child_cmd.stdin(Stdio::inherit());
-                } else if let Some(prev) = prev_stdout.take() {
-                    child_cmd.stdin(prev);
-                }
+                if is_builtin(cmd) {
+                    // Close upstream read pipe if present
+                    drop(prev_reader.take());
 
-                // Pipe output to next stage or redirect stdout
-                if !is_last {
-                    child_cmd.stdout(Stdio::piped());
-                } else if let Some(ref redir) = stdout_redir {
-                    if let Ok(file) = open_file_for_redir(redir) {
-                        child_cmd.stdout(Stdio::from(file));
+                    let mut out_stream: Box<dyn Write> = if let Some(ref redir) = stdout_redir {
+                        if let Ok(file) = open_file_for_redir(redir) {
+                            Box::new(file)
+                        } else {
+                            Box::new(io::stdout())
+                        }
+                    } else if let Some(writer) = next_writer {
+                        Box::new(writer)
+                    } else {
+                        Box::new(io::stdout())
+                    };
+
+                    let mut err_stream: Box<dyn Write> = if let Some(ref redir) = stderr_redir {
+                        if let Ok(file) = open_file_for_redir(redir) {
+                            Box::new(file)
+                        } else {
+                            Box::new(io::stderr())
+                        }
+                    } else {
+                        Box::new(io::stderr())
+                    };
+
+                    execute_builtin(cmd, args, &mut completion_specs, &mut jobs, &mut out_stream, &mut err_stream);
+                } else if let Some(_path) = get_executable_path(cmd) {
+                    let mut child_cmd = Command::new(cmd);
+                    child_cmd.args(args);
+
+                    if let Some(reader) = prev_reader.take() {
+                        child_cmd.stdin(Stdio::from(reader));
+                    } else {
+                        child_cmd.stdin(Stdio::inherit());
                     }
-                }
 
-                if let Some(ref redir) = stderr_redir {
-                    if let Ok(file) = open_file_for_redir(redir) {
-                        child_cmd.stderr(Stdio::from(file));
+                    if let Some(ref redir) = stdout_redir {
+                        if let Ok(file) = open_file_for_redir(redir) {
+                            child_cmd.stdout(Stdio::from(file));
+                        }
+                    } else if let Some(writer) = next_writer {
+                        child_cmd.stdout(Stdio::from(writer));
                     }
-                }
 
-                if let Ok(mut child) = child_cmd.spawn() {
-                    if !is_last {
-                        if let Some(out) = child.stdout.take() {
-                            prev_stdout = Some(Stdio::from(out));
+                    if let Some(ref redir) = stderr_redir {
+                        if let Ok(file) = open_file_for_redir(redir) {
+                            child_cmd.stderr(Stdio::from(file));
                         }
                     }
-                    children.push(child);
+
+                    if let Ok(child) = child_cmd.spawn() {
+                        children.push(child);
+                    }
+                } else {
+                    eprintln!("{}: command not found", cmd);
                 }
+
+                prev_reader = next_reader;
             }
 
-            // Wait for pipeline commands to complete
             for mut child in children {
                 let _ = child.wait();
             }
