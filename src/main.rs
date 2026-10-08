@@ -113,10 +113,7 @@ fn execute_builtin(
                 completion_specs.remove(target_cmd);
             }
         }
-    } else {
-        execute_builtin(cmd, args, completion_specs, jobs, out, err_out);
-    }
-} else if cmd == "jobs" {
+    } else if cmd == "jobs" {
         let total_jobs = jobs.len();
         let mut remaining_jobs = Vec::new();
 
