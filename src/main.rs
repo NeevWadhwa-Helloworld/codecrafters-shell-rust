@@ -70,6 +70,7 @@ fn execute_builtin(
     completion_specs: &mut BTreeMap<String, String>,
     jobs: &mut Vec<Job>,
     history: &mut Vec<String>,
+    history_appended_index: &mut usize,
     out: &mut dyn Write,
     err_out: &mut dyn Write,
 ) {
@@ -168,6 +169,15 @@ fn execute_builtin(
                 }
                 let _ = std::fs::write(path, content);
             }
+        } else if args.first().map(|s| s.as_str()) == Some("-a") {
+            if let Some(path) = args.get(1) {
+                if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                    for entry in history.iter().skip(*history_appended_index) {
+                        let _ = writeln!(file, "{}", entry);
+                    }
+                    *history_appended_index = history.len();
+                }
+            }
         } else {
             let count = args.first().and_then(|s| s.parse::<usize>().ok()).unwrap_or(history.len());
             let start_idx = history.len().saturating_sub(count);
@@ -188,6 +198,7 @@ fn main() {
     // List to track active background jobs
     let mut jobs: Vec<Job> = Vec::new();
     let mut history: Vec<String> = Vec::new();
+    let mut history_appended_index: usize = 0;
 
     loop {
         // Automatically reap finished jobs before displaying the prompt
@@ -297,7 +308,7 @@ fn main() {
                         Box::new(io::stderr())
                     };
 
-                    execute_builtin(cmd, args, &mut completion_specs, &mut jobs, &mut history, &mut out_stream, &mut err_stream);
+                    execute_builtin(cmd, args, &mut completion_specs, &mut jobs, &mut history, &mut history_appended_index, &mut out_stream, &mut err_stream);
                 } else if let Some(_path) = get_executable_path(cmd) {
                     let mut child_cmd = Command::new(cmd);
                     child_cmd.args(args);
@@ -522,6 +533,15 @@ fn main() {
                         content.push('\n');
                     }
                     let _ = std::fs::write(path, content);
+                }
+            } else if args.first().map(|s| s.as_str()) == Some("-a") {
+                if let Some(path) = args.get(1) {
+                    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                        for entry in history.iter().skip(history_appended_index) {
+                            let _ = writeln!(file, "{}", entry);
+                        }
+                        history_appended_index = history.len();
+                    }
                 }
             } else {
                 let count = args.first().and_then(|s| s.parse::<usize>().ok()).unwrap_or(history.len());
