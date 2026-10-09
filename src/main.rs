@@ -186,6 +186,14 @@ fn execute_builtin(
             }
         }
     } else if cmd == "exit" {
+        if let Ok(hist_path) = std::env::var("HISTFILE") {
+            let mut content = String::new();
+            for entry in history.iter() {
+                content.push_str(entry);
+                content.push('\n');
+            }
+            let _ = std::fs::write(hist_path, content);
+        }
         std::process::exit(0);
     }
 }
@@ -199,6 +207,16 @@ fn main() {
     let mut jobs: Vec<Job> = Vec::new();
     let mut history: Vec<String> = Vec::new();
     let mut history_appended_index: usize = 0;
+
+    if let Ok(hist_path) = std::env::var("HISTFILE") {
+        if let Ok(content) = std::fs::read_to_string(&hist_path) {
+            for line in content.lines() {
+                if !line.is_empty() {
+                    history.push(line.to_string());
+                }
+            }
+        }
+    }
 
     loop {
         // Automatically reap finished jobs before displaying the prompt
@@ -595,6 +613,15 @@ fn main() {
         } else {
             write_stderr(&format!("{}: command not found", cmd));
         }
+    }
+
+    if let Ok(hist_path) = std::env::var("HISTFILE") {
+        let mut content = String::new();
+        for entry in history.iter() {
+            content.push_str(entry);
+            content.push('\n');
+        }
+        let _ = std::fs::write(hist_path, content);
     }
 }
 
