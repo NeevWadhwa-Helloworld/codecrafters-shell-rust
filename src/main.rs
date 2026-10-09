@@ -71,6 +71,7 @@ fn execute_builtin(
     jobs: &mut Vec<Job>,
     history: &mut Vec<String>,
     history_appended_index: &mut usize,
+    shell_vars: &mut BTreeMap<String, String>,
     out: &mut dyn Write,
     err_out: &mut dyn Write,
 ) {
@@ -186,7 +187,19 @@ fn execute_builtin(
             }
         }
     } else if cmd == "declare" {
-        // declare builtin placeholder
+        if args.first().map(|s| s.as_str()) == Some("-p") {
+            if let Some(var_name) = args.get(1) {
+                if let Some(val) = shell_vars.get(var_name) {
+                    let _ = writeln!(out, "declare -- {}=\"{}\"", var_name, val);
+                } else {
+                    let _ = writeln!(err_out, "declare: {}: not found", var_name);
+                }
+            }
+        } else if let Some(arg) = args.first() {
+            if let Some((k, v)) = arg.split_once('=') {
+                shell_vars.insert(k.to_string(), v.to_string());
+            }
+        }
     } else if cmd == "exit" {
         if let Ok(hist_path) = std::env::var("HISTFILE") {
             let mut content = String::new();
@@ -209,6 +222,7 @@ fn main() {
     let mut jobs: Vec<Job> = Vec::new();
     let mut history: Vec<String> = Vec::new();
     let mut history_appended_index: usize = 0;
+    let mut shell_vars: BTreeMap<String, String> = BTreeMap::new();
 
     if let Ok(hist_path) = std::env::var("HISTFILE") {
         if let Ok(content) = std::fs::read_to_string(&hist_path) {
@@ -328,7 +342,7 @@ fn main() {
                         Box::new(io::stderr())
                     };
 
-                    execute_builtin(cmd, args, &mut completion_specs, &mut jobs, &mut history, &mut history_appended_index, &mut out_stream, &mut err_stream);
+                    execute_builtin(cmd, args, &mut completion_specs, &mut jobs, &mut history, &mut history_appended_index, &mut shell_vars, &mut out_stream, &mut err_stream);
                 } else if let Some(_path) = get_executable_path(cmd) {
                     let mut child_cmd = Command::new(cmd);
                     child_cmd.args(args);
@@ -571,7 +585,19 @@ fn main() {
                 }
             }
         } else if cmd == "declare" {
-            // declare builtin placeholder
+            if args.first().map(|s| s.as_str()) == Some("-p") {
+                if let Some(var_name) = args.get(1) {
+                    if let Some(val) = shell_vars.get(var_name) {
+                        write_stdout(&format!("declare -- {}=\"{}\"", var_name, val));
+                    } else {
+                        write_stderr(&format!("declare: {}: not found", var_name));
+                    }
+                }
+            } else if let Some(arg) = args.first() {
+                if let Some((k, v)) = arg.split_once('=') {
+                    shell_vars.insert(k.to_string(), v.to_string());
+                }
+            }
         } else if let Some(_path) = get_executable_path(cmd) {
             let mut child_cmd = Command::new(cmd);
             child_cmd.args(args);
