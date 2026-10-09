@@ -64,6 +64,32 @@ fn is_builtin(cmd: &str) -> bool {
     matches!(cmd, "echo" | "pwd" | "cd" | "type" | "complete" | "jobs" | "exit" | "history" | "declare")
 }
 
+fn expand_variables(token: &str, shell_vars: &BTreeMap<String, String>) -> String {
+    let mut result = String::new();
+    let chars: Vec<char> = token.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '$' && i + 1 < chars.len() {
+            i += 1;
+            let start = i;
+            while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
+            let var_name: String = chars[start..i].iter().collect();
+            if var_name.is_empty() {
+                result.push('$');
+            } else if let Some(val) = shell_vars.get(&var_name) {
+                result.push_str(val);
+            }
+            // If var not found, expand to empty string (bash behavior)
+        } else {
+            result.push(chars[i]);
+            i += 1;
+        }
+    }
+    result
+}
+
 fn is_valid_identifier(name: &str) -> bool {
     if name.is_empty() {
         return false;
@@ -269,7 +295,10 @@ fn main() {
 
         history.push(command.to_string());
 
-        let parts = parse_command_line(command);
+        let parts: Vec<String> = parse_command_line(command)
+            .into_iter()
+            .map(|t| expand_variables(&t, &shell_vars))
+            .collect();
 
         // Pipeline handling (|) with built-in support
         if parts.contains(&"|".to_string()) {
