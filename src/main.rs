@@ -71,17 +71,33 @@ fn expand_variables(token: &str, shell_vars: &BTreeMap<String, String>) -> Strin
     while i < chars.len() {
         if chars[i] == '$' && i + 1 < chars.len() {
             i += 1;
-            let start = i;
-            while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+            if chars[i] == '{' {
+                // ${VAR} brace form
                 i += 1;
+                let start = i;
+                while i < chars.len() && chars[i] != '}' {
+                    i += 1;
+                }
+                let var_name: String = chars[start..i].iter().collect();
+                if i < chars.len() { i += 1; } // consume '}'
+                if let Some(val) = shell_vars.get(&var_name) {
+                    result.push_str(val);
+                }
+                // unknown var expands to empty string
+            } else {
+                // $VAR plain form
+                let start = i;
+                while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                    i += 1;
+                }
+                let var_name: String = chars[start..i].iter().collect();
+                if var_name.is_empty() {
+                    result.push('$');
+                } else if let Some(val) = shell_vars.get(&var_name) {
+                    result.push_str(val);
+                }
+                // unknown var expands to empty string
             }
-            let var_name: String = chars[start..i].iter().collect();
-            if var_name.is_empty() {
-                result.push('$');
-            } else if let Some(val) = shell_vars.get(&var_name) {
-                result.push_str(val);
-            }
-            // If var not found, expand to empty string (bash behavior)
         } else {
             result.push(chars[i]);
             i += 1;
