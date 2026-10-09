@@ -149,7 +149,9 @@ fn execute_builtin(
         }
         *jobs = remaining_jobs;
     } else if cmd == "history" {
-        for (i, entry) in history.iter().enumerate() {
+        let count = args.first().and_then(|s| s.parse::<usize>().ok()).unwrap_or(history.len());
+        let start_idx = history.len().saturating_sub(count);
+        for (i, entry) in history.iter().enumerate().skip(start_idx) {
             let _ = writeln!(out, "{:>5}  {}", i + 1, entry);
         }
     } else if cmd == "exit" {
@@ -481,7 +483,9 @@ fn main() {
             // Retain only the jobs that are still running
             jobs = remaining_jobs;
         } else if cmd == "history" {
-            for (i, entry) in history.iter().enumerate() {
+            let count = args.first().and_then(|s| s.parse::<usize>().ok()).unwrap_or(history.len());
+            let start_idx = history.len().saturating_sub(count);
+            for (i, entry) in history.iter().enumerate().skip(start_idx) {
                 write_stdout(&format!("{:>5}  {}", i + 1, entry));
             }
         } else if let Some(_path) = get_executable_path(cmd) {
