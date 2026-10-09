@@ -159,6 +159,15 @@ fn execute_builtin(
                     }
                 }
             }
+        } else if args.first().map(|s| s.as_str()) == Some("-w") {
+            if let Some(path) = args.get(1) {
+                let mut content = String::new();
+                for entry in history.iter() {
+                    content.push_str(entry);
+                    content.push('\n');
+                }
+                let _ = std::fs::write(path, content);
+            }
         } else {
             let count = args.first().and_then(|s| s.parse::<usize>().ok()).unwrap_or(history.len());
             let start_idx = history.len().saturating_sub(count);
@@ -504,6 +513,15 @@ fn main() {
                             }
                         }
                     }
+                }
+            } else if args.first().map(|s| s.as_str()) == Some("-w") {
+                if let Some(path) = args.get(1) {
+                    let mut content = String::new();
+                    for entry in history.iter() {
+                        content.push_str(entry);
+                        content.push('\n');
+                    }
+                    let _ = std::fs::write(path, content);
                 }
             } else {
                 let count = args.first().and_then(|s| s.parse::<usize>().ok()).unwrap_or(history.len());
