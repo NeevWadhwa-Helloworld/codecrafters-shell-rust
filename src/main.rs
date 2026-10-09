@@ -647,11 +647,11 @@ fn main() {
                     if is_valid_identifier(k) {
                         shell_vars.insert(k.to_string(), v.to_string());
                     } else {
-                        write_stderr(&format!("declare: `{}`: not a valid identifier", arg));
+                        write_stderr(&format!("declare: `{}': not a valid identifier", arg));
                     }
                 } else {
                     if !is_valid_identifier(arg) {
-                        write_stderr(&format!("declare: `{}`: not a valid identifier", arg));
+                        write_stderr(&format!("declare: `{}': not a valid identifier", arg));
                     }
                 }
             }
