@@ -314,6 +314,7 @@ fn main() {
         let parts: Vec<String> = parse_command_line(command)
             .into_iter()
             .map(|t| expand_variables(&t, &shell_vars))
+            .filter(|t| !t.is_empty())
             .collect();
 
         // Pipeline handling (|) with built-in support
