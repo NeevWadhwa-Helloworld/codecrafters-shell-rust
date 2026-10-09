@@ -69,7 +69,7 @@ fn execute_builtin(
     args: &[String],
     completion_specs: &mut BTreeMap<String, String>,
     jobs: &mut Vec<Job>,
-    history: &[String],
+    history: &mut Vec<String>,
     out: &mut dyn Write,
     err_out: &mut dyn Write,
 ) {
@@ -149,10 +149,22 @@ fn execute_builtin(
         }
         *jobs = remaining_jobs;
     } else if cmd == "history" {
-        let count = args.first().and_then(|s| s.parse::<usize>().ok()).unwrap_or(history.len());
-        let start_idx = history.len().saturating_sub(count);
-        for (i, entry) in history.iter().enumerate().skip(start_idx) {
-            let _ = writeln!(out, "{:>5}  {}", i + 1, entry);
+        if args.first().map(|s| s.as_str()) == Some("-r") {
+            if let Some(path) = args.get(1) {
+                if let Ok(content) = std::fs::read_to_string(path) {
+                    for line in content.lines() {
+                        if !line.is_empty() {
+                            history.push(line.to_string());
+                        }
+                    }
+                }
+            }
+        } else {
+            let count = args.first().and_then(|s| s.parse::<usize>().ok()).unwrap_or(history.len());
+            let start_idx = history.len().saturating_sub(count);
+            for (i, entry) in history.iter().enumerate().skip(start_idx) {
+                let _ = writeln!(out, "{:>5}  {}", i + 1, entry);
+            }
         }
     } else if cmd == "exit" {
         std::process::exit(0);
@@ -276,7 +288,7 @@ fn main() {
                         Box::new(io::stderr())
                     };
 
-                    execute_builtin(cmd, args, &mut completion_specs, &mut jobs, &history, &mut out_stream, &mut err_stream);
+                    execute_builtin(cmd, args, &mut completion_specs, &mut jobs, &mut history, &mut out_stream, &mut err_stream);
                 } else if let Some(_path) = get_executable_path(cmd) {
                     let mut child_cmd = Command::new(cmd);
                     child_cmd.args(args);
@@ -483,10 +495,22 @@ fn main() {
             // Retain only the jobs that are still running
             jobs = remaining_jobs;
         } else if cmd == "history" {
-            let count = args.first().and_then(|s| s.parse::<usize>().ok()).unwrap_or(history.len());
-            let start_idx = history.len().saturating_sub(count);
-            for (i, entry) in history.iter().enumerate().skip(start_idx) {
-                write_stdout(&format!("{:>5}  {}", i + 1, entry));
+            if args.first().map(|s| s.as_str()) == Some("-r") {
+                if let Some(path) = args.get(1) {
+                    if let Ok(content) = std::fs::read_to_string(path) {
+                        for line in content.lines() {
+                            if !line.is_empty() {
+                                history.push(line.to_string());
+                            }
+                        }
+                    }
+                }
+            } else {
+                let count = args.first().and_then(|s| s.parse::<usize>().ok()).unwrap_or(history.len());
+                let start_idx = history.len().saturating_sub(count);
+                for (i, entry) in history.iter().enumerate().skip(start_idx) {
+                    write_stdout(&format!("{:>5}  {}", i + 1, entry));
+                }
             }
         } else if let Some(_path) = get_executable_path(cmd) {
             let mut child_cmd = Command::new(cmd);
