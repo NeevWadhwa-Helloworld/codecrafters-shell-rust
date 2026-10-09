@@ -446,12 +446,14 @@ fn main() {
             }
         } else if cmd == "type" {
             if let Some(cmd_arg) = args.first() {
-                if cmd_arg == "echo" || cmd_arg == "type" || cmd_arg == "exit" || cmd_arg == "pwd" || cmd_arg == "complete" || cmd_arg == "jobs" {
-                    write_stdout(&format!("{} is a shell builtin", cmd_arg));
+                
+                // UPDATE THIS CONDITION: Use the helper function to check if it's a builtin
+                if is_builtin(cmd_arg) {
+                    println!("{} is a shell builtin", cmd_arg);
                 } else if let Some(path) = get_executable_path(cmd_arg) {
-                    write_stdout(&format!("{} is {}", cmd_arg, path.display()));
+                    println!("{} is {}", cmd_arg, path.display());
                 } else {
-                    write_stdout(&format!("{}: not found", cmd_arg));
+                    println!("{}: not found", cmd_arg);
                 }
             }
         } else if cmd == "complete" {
