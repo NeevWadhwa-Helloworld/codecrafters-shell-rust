@@ -446,15 +446,25 @@ fn main() {
             }
         } else if cmd == "type" {
             if let Some(cmd_arg) = args.first() {
-                if cmd_arg == "echo" || cmd_arg == "type" || cmd_arg == "exit" || cmd_arg == "pwd" || cmd_arg == "complete" || cmd_arg == "jobs" || cmd_arg=="history" {
-                    write_stdout(&format!("{} is a shell builtin", cmd_arg));
+                // Ensure "history" (and "cd" just in case!) are in this list
+                if cmd_arg == "echo" || cmd_arg == "type" || cmd_arg == "exit" || cmd_arg == "pwd" || cmd_arg == "complete" || cmd_arg == "jobs" || cmd_arg == "cd" || cmd_arg == "history" {
+                    
+                    // USE println! HERE
+                    println!("{} is a shell builtin", cmd_arg);
+                    
                 } else if let Some(path) = get_executable_path(cmd_arg) {
-                    write_stdout(&format!("{} is {}", cmd_arg, path.display()));
+                    
+                    // USE println! HERE
+                    println!("{} is {}", cmd_arg, path.display());
+                    
                 } else {
-                    write_stdout(&format!("{}: not found", cmd_arg));
+                    
+                    // USE println! HERE
+                    println!("{}: not found", cmd_arg);
+                    
                 }
             }
-        } else if cmd == "complete" {
+        }else if cmd == "complete" {
             if args.first().map(|s| s.as_str()) == Some("-C") {
                 if args.len() >= 3 {
                     let script_path = &args[1];
