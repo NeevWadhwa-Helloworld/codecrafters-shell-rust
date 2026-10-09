@@ -175,7 +175,7 @@ fn main() {
         print!("$ ");
         io::stdout().flush().unwrap();
 
-        let command = read_line_with_completion(&completion_specs);
+        let command = read_line_with_completion(&completion_specs, &history);
         let command = command.trim_end_matches(['\n', '\r']);
         if command.is_empty() {
             continue;
@@ -660,10 +660,14 @@ fn run_completer_script(
     Some(lines)
 }
 
-fn read_line_with_completion(completion_specs: &BTreeMap<String, String>) -> String {
+fn read_line_with_completion(
+    completion_specs: &BTreeMap<String, String>,
+    history: &[String],
+) -> String {
     let mut buffer = String::new();
     let mut stdin = io::stdin();
     let mut tab_count = 0;
+    let mut history_index = history.len();
 
     loop {
         let mut byte = [0u8; 1];
@@ -837,6 +841,34 @@ fn read_line_with_completion(completion_specs: &BTreeMap<String, String>) -> Str
                     buffer.pop();
                     print!("\r$ {}\x1b[K", buffer);
                     io::stdout().flush().unwrap();
+                }
+            }
+            b'\x1b' => {
+                tab_count = 0;
+                let mut seq = [0u8; 2];
+                if stdin.read_exact(&mut seq).is_ok() {
+                    if seq == [b'[', b'A'] {
+                        // Up arrow
+                        if history_index > 0 {
+                            history_index -= 1;
+                            buffer = history[history_index].clone();
+                            print!("\r$ {}\x1b[K", buffer);
+                            io::stdout().flush().unwrap();
+                        }
+                    } else if seq == [b'[', b'B'] {
+                        // Down arrow
+                        if history_index + 1 < history.len() {
+                            history_index += 1;
+                            buffer = history[history_index].clone();
+                            print!("\r$ {}\x1b[K", buffer);
+                            io::stdout().flush().unwrap();
+                        } else if history_index + 1 == history.len() {
+                            history_index += 1;
+                            buffer.clear();
+                            print!("\r$ {}\x1b[K", buffer);
+                            io::stdout().flush().unwrap();
+                        }
+                    }
                 }
             }
             b => {
