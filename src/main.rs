@@ -61,7 +61,7 @@ fn reap_jobs(jobs: &mut Vec<Job>) {
 }
 
 fn is_builtin(cmd: &str) -> bool {
-    matches!(cmd, "echo" | "pwd" | "cd" | "type" | "complete" | "jobs" | "exit" | "history")
+    matches!(cmd, "echo" | "pwd" | "cd" | "type" | "complete" | "jobs" | "exit")
 }
 
 fn execute_builtin(
@@ -69,7 +69,6 @@ fn execute_builtin(
     args: &[String],
     completion_specs: &mut BTreeMap<String, String>,
     jobs: &mut Vec<Job>,
-    history: &[String], // <--- Add this parameter
     out: &mut dyn Write,
     err_out: &mut dyn Write,
 ) {
@@ -148,11 +147,6 @@ fn execute_builtin(
             }
         }
         *jobs = remaining_jobs;
-    }else if cmd == "history" {
-        // Print all recorded commands with right-aligned numbering
-        for (i, record) in history.iter().enumerate() {
-            let _ = writeln!(out, "{:>5}  {}", i + 1, record);
-        }
     } else if cmd == "exit" {
         std::process::exit(0);
     }
@@ -166,9 +160,6 @@ fn main() {
     // List to track active background jobs
     let mut jobs: Vec<Job> = Vec::new();
 
-    // Add this outside your main loop
-    let mut command_history: Vec<String> = Vec::new();
-
     loop {
         // Automatically reap finished jobs before displaying the prompt
         reap_jobs(&mut jobs);
@@ -177,18 +168,6 @@ fn main() {
         io::stdout().flush().unwrap();
 
         let command = read_line_with_completion(&completion_specs);
-
-        let mut command = String::new();
-        io::stdin().read_line(&mut command).unwrap();
-        let trimmed_cmd = command.trim().to_string();
-
-        if trimmed_cmd.is_empty() {
-            continue;
-        }
-
-        // Record command in history BEFORE executing
-        command_history.push(trimmed_cmd.clone());
-
         let command = command.trim_end_matches(['\n', '\r']);
         if command.is_empty() {
             continue;
@@ -287,16 +266,7 @@ fn main() {
                         Box::new(io::stderr())
                     };
 
-// Update this line wherever execute_builtin is called:
-                    execute_builtin(
-                        cmd, 
-                        args, 
-                        &mut completion_specs, 
-                        &mut jobs, 
-                        &command_history, // <--- Pass the history reference here
-                        &mut out_stream, 
-                        &mut err_stream
-                    );                
+                    execute_builtin(cmd, args, &mut completion_specs, &mut jobs, &mut out_stream, &mut err_stream);
                 } else if let Some(_path) = get_executable_path(cmd) {
                     let mut child_cmd = Command::new(cmd);
                     child_cmd.args(args);
@@ -395,9 +365,6 @@ fn main() {
         let cmd = clean_parts[0].as_str();
         let args = &clean_parts[1..];
 
-        // Add the command to the history
-        command_history.push(parts.join(" "));
-
         if let Some(ref redir) = stdout_redir {
             let _ = open_file_for_redir(redir);
         }
@@ -446,25 +413,15 @@ fn main() {
             }
         } else if cmd == "type" {
             if let Some(cmd_arg) = args.first() {
-                // Ensure "history" (and "cd" just in case!) are in this list
-                if cmd_arg == "echo" || cmd_arg == "type" || cmd_arg == "exit" || cmd_arg == "pwd" || cmd_arg == "complete" || cmd_arg == "jobs" || cmd_arg == "cd" || cmd_arg == "history" {
-                    
-                    // USE println! HERE
-                    println!("{} is a shell builtin", cmd_arg);
-                    
+                if cmd_arg == "echo" || cmd_arg == "type" || cmd_arg == "exit" || cmd_arg == "pwd" || cmd_arg == "complete" || cmd_arg == "jobs" {
+                    write_stdout(&format!("{} is a shell builtin", cmd_arg));
                 } else if let Some(path) = get_executable_path(cmd_arg) {
-                    
-                    // USE println! HERE
-                    println!("{} is {}", cmd_arg, path.display());
-                    
+                    write_stdout(&format!("{} is {}", cmd_arg, path.display()));
                 } else {
-                    
-                    // USE println! HERE
-                    println!("{}: not found", cmd_arg);
-                    
+                    write_stdout(&format!("{}: not found", cmd_arg));
                 }
             }
-        }else if cmd == "complete" {
+        } else if cmd == "complete" {
             if args.first().map(|s| s.as_str()) == Some("-C") {
                 if args.len() >= 3 {
                     let script_path = &args[1];
