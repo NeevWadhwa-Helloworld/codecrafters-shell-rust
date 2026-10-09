@@ -61,7 +61,7 @@ fn reap_jobs(jobs: &mut Vec<Job>) {
 }
 
 fn is_builtin(cmd: &str) -> bool {
-    matches!(cmd, "echo" | "pwd" | "cd" | "type" | "complete" | "jobs" | "exit")
+    matches!(cmd, "echo" | "pwd" | "cd" | "type" | "complete" | "jobs" | "exit" | "history")
 }
 
 fn execute_builtin(
@@ -69,6 +69,7 @@ fn execute_builtin(
     args: &[String],
     completion_specs: &mut BTreeMap<String, String>,
     jobs: &mut Vec<Job>,
+    history: &[String], // <--- Add this parameter
     out: &mut dyn Write,
     err_out: &mut dyn Write,
 ) {
@@ -147,6 +148,11 @@ fn execute_builtin(
             }
         }
         *jobs = remaining_jobs;
+    }else if cmd == "history" {
+        // Print all recorded commands with right-aligned numbering
+        for (i, record) in history.iter().enumerate() {
+            let _ = writeln!(out, "{:>5}  {}", i + 1, record);
+        }
     } else if cmd == "exit" {
         std::process::exit(0);
     }
@@ -160,6 +166,9 @@ fn main() {
     // List to track active background jobs
     let mut jobs: Vec<Job> = Vec::new();
 
+    // Add this outside your main loop
+    let mut command_history: Vec<String> = Vec::new();
+
     loop {
         // Automatically reap finished jobs before displaying the prompt
         reap_jobs(&mut jobs);
@@ -168,6 +177,18 @@ fn main() {
         io::stdout().flush().unwrap();
 
         let command = read_line_with_completion(&completion_specs);
+
+        let mut command = String::new();
+        io::stdin().read_line(&mut command).unwrap();
+        let trimmed_cmd = command.trim().to_string();
+
+        if trimmed_cmd.is_empty() {
+            continue;
+        }
+
+        // Record command in history BEFORE executing
+        command_history.push(trimmed_cmd.clone());
+
         let command = command.trim_end_matches(['\n', '\r']);
         if command.is_empty() {
             continue;
@@ -266,7 +287,16 @@ fn main() {
                         Box::new(io::stderr())
                     };
 
-                    execute_builtin(cmd, args, &mut completion_specs, &mut jobs, &mut out_stream, &mut err_stream);
+// Update this line wherever execute_builtin is called:
+                    execute_builtin(
+                        cmd, 
+                        args, 
+                        &mut completion_specs, 
+                        &mut jobs, 
+                        &command_history, // <--- Pass the history reference here
+                        &mut out_stream, 
+                        &mut err_stream
+                    );                
                 } else if let Some(_path) = get_executable_path(cmd) {
                     let mut child_cmd = Command::new(cmd);
                     child_cmd.args(args);
@@ -364,6 +394,9 @@ fn main() {
 
         let cmd = clean_parts[0].as_str();
         let args = &clean_parts[1..];
+
+        // Add the command to the history
+        command_history.push(parts.join(" "));
 
         if let Some(ref redir) = stdout_redir {
             let _ = open_file_for_redir(redir);
