@@ -61,7 +61,7 @@ fn reap_jobs(jobs: &mut Vec<Job>) {
 }
 
 fn is_builtin(cmd: &str) -> bool {
-    matches!(cmd, "echo" | "pwd" | "cd" | "type" | "complete" | "jobs" | "exit" | "history")
+    matches!(cmd, "echo" | "pwd" | "cd" | "type" | "complete" | "jobs" | "exit" | "history" | "declare")
 }
 
 fn execute_builtin(
@@ -185,6 +185,8 @@ fn execute_builtin(
                 let _ = writeln!(out, "{:>5}  {}", i + 1, entry);
             }
         }
+    } else if cmd == "declare" {
+        // declare builtin placeholder
     } else if cmd == "exit" {
         if let Ok(hist_path) = std::env::var("HISTFILE") {
             let mut content = String::new();
@@ -568,6 +570,8 @@ fn main() {
                     write_stdout(&format!("{:>5}  {}", i + 1, entry));
                 }
             }
+        } else if cmd == "declare" {
+            // declare builtin placeholder
         } else if let Some(_path) = get_executable_path(cmd) {
             let mut child_cmd = Command::new(cmd);
             child_cmd.args(args);
@@ -633,6 +637,7 @@ fn get_executable_completions() -> Vec<String> {
     completions.insert("complete".to_string());
     completions.insert("jobs".to_string());
     completions.insert("history".to_string());
+    completions.insert("declare".to_string());
 
     if let Some(path_var) = std::env::var_os("PATH") {
         for path in std::env::split_paths(&path_var) {
