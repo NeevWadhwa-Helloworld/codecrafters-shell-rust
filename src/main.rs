@@ -61,7 +61,7 @@ fn reap_jobs(jobs: &mut Vec<Job>) {
 }
 
 fn is_builtin(cmd: &str) -> bool {
-    matches!(cmd, "echo" | "pwd" | "cd" | "type" | "complete" | "jobs" | "exit")
+    matches!(cmd, "echo" | "pwd" | "cd" | "type" | "complete" | "jobs" | "exit" | "history")
 }
 
 fn execute_builtin(
@@ -69,6 +69,7 @@ fn execute_builtin(
     args: &[String],
     completion_specs: &mut BTreeMap<String, String>,
     jobs: &mut Vec<Job>,
+    history: &[String],
     out: &mut dyn Write,
     err_out: &mut dyn Write,
 ) {
@@ -147,6 +148,10 @@ fn execute_builtin(
             }
         }
         *jobs = remaining_jobs;
+    } else if cmd == "history" {
+        for (i, entry) in history.iter().enumerate() {
+            let _ = writeln!(out, "{:>5}  {}", i + 1, entry);
+        }
     } else if cmd == "exit" {
         std::process::exit(0);
     }
@@ -159,6 +164,7 @@ fn main() {
 
     // List to track active background jobs
     let mut jobs: Vec<Job> = Vec::new();
+    let mut history: Vec<String> = Vec::new();
 
     loop {
         // Automatically reap finished jobs before displaying the prompt
@@ -172,6 +178,8 @@ fn main() {
         if command.is_empty() {
             continue;
         }
+
+        history.push(command.to_string());
 
         let parts = parse_command_line(command);
 
@@ -266,7 +274,7 @@ fn main() {
                         Box::new(io::stderr())
                     };
 
-                    execute_builtin(cmd, args, &mut completion_specs, &mut jobs, &mut out_stream, &mut err_stream);
+                    execute_builtin(cmd, args, &mut completion_specs, &mut jobs, &history, &mut out_stream, &mut err_stream);
                 } else if let Some(_path) = get_executable_path(cmd) {
                     let mut child_cmd = Command::new(cmd);
                     child_cmd.args(args);
@@ -413,7 +421,7 @@ fn main() {
             }
         } else if cmd == "type" {
             if let Some(cmd_arg) = args.first() {
-                if cmd_arg == "echo" || cmd_arg == "type" || cmd_arg == "exit" || cmd_arg == "pwd" || cmd_arg == "complete" || cmd_arg == "jobs" {
+                if is_builtin(cmd_arg) {
                     write_stdout(&format!("{} is a shell builtin", cmd_arg));
                 } else if let Some(path) = get_executable_path(cmd_arg) {
                     write_stdout(&format!("{} is {}", cmd_arg, path.display()));
@@ -472,6 +480,10 @@ fn main() {
             
             // Retain only the jobs that are still running
             jobs = remaining_jobs;
+        } else if cmd == "history" {
+            for (i, entry) in history.iter().enumerate() {
+                write_stdout(&format!("{:>5}  {}", i + 1, entry));
+            }
         } else if let Some(_path) = get_executable_path(cmd) {
             let mut child_cmd = Command::new(cmd);
             child_cmd.args(args);
@@ -527,6 +539,7 @@ fn get_executable_completions() -> Vec<String> {
     completions.insert("exit".to_string());
     completions.insert("complete".to_string());
     completions.insert("jobs".to_string());
+    completions.insert("history".to_string());
 
     if let Some(path_var) = std::env::var_os("PATH") {
         for path in std::env::split_paths(&path_var) {
