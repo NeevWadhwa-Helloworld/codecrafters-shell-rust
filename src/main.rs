@@ -64,6 +64,18 @@ fn is_builtin(cmd: &str) -> bool {
     matches!(cmd, "echo" | "pwd" | "cd" | "type" | "complete" | "jobs" | "exit" | "history" | "declare")
 }
 
+fn is_valid_identifier(name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    let mut chars = name.chars();
+    let first = chars.next().unwrap();
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return false;
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 fn execute_builtin(
     cmd: &str,
     args: &[String],
@@ -197,7 +209,15 @@ fn execute_builtin(
             }
         } else if let Some(arg) = args.first() {
             if let Some((k, v)) = arg.split_once('=') {
-                shell_vars.insert(k.to_string(), v.to_string());
+                if is_valid_identifier(k) {
+                    shell_vars.insert(k.to_string(), v.to_string());
+                } else {
+                    let _ = writeln!(err_out, "declare: `{}': not a valid identifier", arg);
+                }
+            } else {
+                if !is_valid_identifier(arg) {
+                    let _ = writeln!(err_out, "declare: `{}': not a valid identifier", arg);
+                }
             }
         }
     } else if cmd == "exit" {
@@ -595,7 +615,15 @@ fn main() {
                 }
             } else if let Some(arg) = args.first() {
                 if let Some((k, v)) = arg.split_once('=') {
-                    shell_vars.insert(k.to_string(), v.to_string());
+                    if is_valid_identifier(k) {
+                        shell_vars.insert(k.to_string(), v.to_string());
+                    } else {
+                        write_stderr(&format!("declare: `{}`: not a valid identifier", arg));
+                    }
+                } else {
+                    if !is_valid_identifier(arg) {
+                        write_stderr(&format!("declare: `{}`: not a valid identifier", arg));
+                    }
                 }
             }
         } else if let Some(_path) = get_executable_path(cmd) {
