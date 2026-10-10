@@ -8,6 +8,7 @@ use std::process::{Child, Command, Stdio};
 #[cfg(unix)]
 use std::os::fd::OwnedFd;
 
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -64,6 +65,55 @@ fn is_builtin(cmd: &str) -> bool {
     matches!(cmd, "echo" | "pwd" | "cd" | "type" | "complete" | "jobs" | "exit" | "history" | "declare")
 }
 
+fn save_history_to_file(path: &str, history: &[String]) {
+    let mut content = String::new();
+    for entry in history {
+        content.push_str(entry);
+        content.push('\n');
+    }
+    let _ = std::fs::write(path, content);
+}
+
+fn parse_redirections(tokens: &[String]) -> (Vec<String>, Option<Redirection>, Option<Redirection>) {
+    let mut stdout_redir = None;
+    let mut stderr_redir = None;
+    let mut clean_tokens = Vec::new();
+
+    let mut i = 0;
+    while i < tokens.len() {
+        if (tokens[i] == ">>" || tokens[i] == "1>>") && i + 1 < tokens.len() {
+            stdout_redir = Some(Redirection {
+                path: tokens[i + 1].clone(),
+                mode: RedirectMode::Append,
+            });
+            i += 2;
+        } else if (tokens[i] == ">" || tokens[i] == "1>") && i + 1 < tokens.len() {
+            stdout_redir = Some(Redirection {
+                path: tokens[i + 1].clone(),
+                mode: RedirectMode::Overwrite,
+            });
+            i += 2;
+        } else if tokens[i] == "2>>" && i + 1 < tokens.len() {
+            stderr_redir = Some(Redirection {
+                path: tokens[i + 1].clone(),
+                mode: RedirectMode::Append,
+            });
+            i += 2;
+        } else if tokens[i] == "2>" && i + 1 < tokens.len() {
+            stderr_redir = Some(Redirection {
+                path: tokens[i + 1].clone(),
+                mode: RedirectMode::Overwrite,
+            });
+            i += 2;
+        } else {
+            clean_tokens.push(tokens[i].clone());
+            i += 1;
+        }
+    }
+
+    (clean_tokens, stdout_redir, stderr_redir)
+}
+
 fn expand_variables(token: &str, shell_vars: &BTreeMap<String, String>) -> String {
     let mut result = String::new();
     let chars: Vec<char> = token.chars().collect();
@@ -118,6 +168,7 @@ fn is_valid_identifier(name: &str) -> bool {
     chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+// Executes a shell builtin command. Returns true if the shell should exit.
 fn execute_builtin(
     cmd: &str,
     args: &[String],
@@ -128,7 +179,7 @@ fn execute_builtin(
     shell_vars: &mut BTreeMap<String, String>,
     out: &mut dyn Write,
     err_out: &mut dyn Write,
-) {
+) -> bool {
     if cmd == "echo" {
         let _ = writeln!(out, "{}", args.join(" "));
     } else if cmd == "pwd" {
@@ -217,12 +268,7 @@ fn execute_builtin(
             }
         } else if args.first().map(|s| s.as_str()) == Some("-w") {
             if let Some(path) = args.get(1) {
-                let mut content = String::new();
-                for entry in history.iter() {
-                    content.push_str(entry);
-                    content.push('\n');
-                }
-                let _ = std::fs::write(path, content);
+                save_history_to_file(path, history);
             }
         } else if args.first().map(|s| s.as_str()) == Some("-a") {
             if let Some(path) = args.get(1) {
@@ -263,16 +309,9 @@ fn execute_builtin(
             }
         }
     } else if cmd == "exit" {
-        if let Ok(hist_path) = std::env::var("HISTFILE") {
-            let mut content = String::new();
-            for entry in history.iter() {
-                content.push_str(entry);
-                content.push('\n');
-            }
-            let _ = std::fs::write(hist_path, content);
-        }
-        std::process::exit(0);
+        return true;
     }
+    false
 }
 
 fn main() {
@@ -317,6 +356,7 @@ fn main() {
             .filter(|t| !t.is_empty())
             .collect();
 
+        #[cfg(unix)]
         // Pipeline handling (|) with built-in support
         if parts.contains(&"|".to_string()) {
             let stages: Vec<Vec<String>> = parts
@@ -331,41 +371,7 @@ fn main() {
             for (idx, stage) in stages.iter().enumerate() {
                 let is_last = idx == total_stages - 1;
 
-                let mut stdout_redir: Option<Redirection> = None;
-                let mut stderr_redir: Option<Redirection> = None;
-                let mut clean_stage = Vec::new();
-
-                let mut i = 0;
-                while i < stage.len() {
-                    if (stage[i] == ">>" || stage[i] == "1>>") && i + 1 < stage.len() {
-                        stdout_redir = Some(Redirection {
-                            path: stage[i + 1].clone(),
-                            mode: RedirectMode::Append,
-                        });
-                        i += 2;
-                    } else if (stage[i] == ">" || stage[i] == "1>") && i + 1 < stage.len() {
-                        stdout_redir = Some(Redirection {
-                            path: stage[i + 1].clone(),
-                            mode: RedirectMode::Overwrite,
-                        });
-                        i += 2;
-                    } else if stage[i] == "2>>" && i + 1 < stage.len() {
-                        stderr_redir = Some(Redirection {
-                            path: stage[i + 1].clone(),
-                            mode: RedirectMode::Append,
-                        });
-                        i += 2;
-                    } else if stage[i] == "2>" && i + 1 < stage.len() {
-                        stderr_redir = Some(Redirection {
-                            path: stage[i + 1].clone(),
-                            mode: RedirectMode::Overwrite,
-                        });
-                        i += 2;
-                    } else {
-                        clean_stage.push(stage[i].clone());
-                        i += 1;
-                    }
-                }
+                let (clean_stage, stdout_redir, stderr_redir) = parse_redirections(stage);
 
                 if clean_stage.is_empty() {
                     continue;
@@ -408,7 +414,23 @@ fn main() {
                         Box::new(io::stderr())
                     };
 
-                    execute_builtin(cmd, args, &mut completion_specs, &mut jobs, &mut history, &mut history_appended_index, &mut shell_vars, &mut out_stream, &mut err_stream);
+                    let should_exit = execute_builtin(
+                        cmd,
+                        args,
+                        &mut completion_specs,
+                        &mut jobs,
+                        &mut history,
+                        &mut history_appended_index,
+                        &mut shell_vars,
+                        &mut out_stream,
+                        &mut err_stream,
+                    );
+                    if should_exit {
+                        if let Ok(hist_path) = std::env::var("HISTFILE") {
+                            save_history_to_file(&hist_path, &history);
+                        }
+                        std::process::exit(0);
+                    }
                 } else if let Some(_path) = get_executable_path(cmd) {
                     let mut child_cmd = Command::new(cmd);
                     child_cmd.args(args);
@@ -454,41 +476,7 @@ fn main() {
             continue;
         }
 
-        let mut stdout_redir: Option<Redirection> = None;
-        let mut stderr_redir: Option<Redirection> = None;
-        let mut clean_parts = Vec::new();
-
-        let mut i = 0;
-        while i < parts.len() {
-            if (parts[i] == ">>" || parts[i] == "1>>") && i + 1 < parts.len() {
-                stdout_redir = Some(Redirection {
-                    path: parts[i + 1].clone(),
-                    mode: RedirectMode::Append,
-                });
-                i += 2;
-            } else if (parts[i] == ">" || parts[i] == "1>") && i + 1 < parts.len() {
-                stdout_redir = Some(Redirection {
-                    path: parts[i + 1].clone(),
-                    mode: RedirectMode::Overwrite,
-                });
-                i += 2;
-            } else if parts[i] == "2>>" && i + 1 < parts.len() {
-                stderr_redir = Some(Redirection {
-                    path: parts[i + 1].clone(),
-                    mode: RedirectMode::Append,
-                });
-                i += 2;
-            } else if parts[i] == "2>" && i + 1 < parts.len() {
-                stderr_redir = Some(Redirection {
-                    path: parts[i + 1].clone(),
-                    mode: RedirectMode::Overwrite,
-                });
-                i += 2;
-            } else {
-                clean_parts.push(parts[i].clone());
-                i += 1;
-            }
-        }
+        let (mut clean_parts, stdout_redir, stderr_redir) = parse_redirections(&parts);
 
         if clean_parts.is_empty() {
             continue;
@@ -507,188 +495,57 @@ fn main() {
         let cmd = clean_parts[0].as_str();
         let args = &clean_parts[1..];
 
-        if let Some(ref redir) = stdout_redir {
-            let _ = open_file_for_redir(redir);
-        }
-        if let Some(ref redir) = stderr_redir {
-            let _ = open_file_for_redir(redir);
-        }
-
-        let write_stdout = |output: &str| {
-            if let Some(ref redir) = stdout_redir {
-                if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(&redir.path) {
-                    let _ = writeln!(file, "{}", output);
+        if is_builtin(cmd) {
+            let mut out_stream: Box<dyn Write> = if let Some(ref redir) = stdout_redir {
+                if let Ok(file) = open_file_for_redir(redir) {
+                    Box::new(file)
+                } else {
+                    Box::new(io::stdout())
                 }
             } else {
-                println!("{}", output);
-            }
-        };
-
-        let write_stderr = |output: &str| {
-            if let Some(ref redir) = stderr_redir {
-                if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(&redir.path) {
-                    let _ = writeln!(file, "{}", output);
-                }
-            } else {
-                eprintln!("{}", output);
-            }
-        };
-
-        if cmd == "exit" {
-            break;
-        } else if cmd == "echo" {
-            write_stdout(&args.join(" "));
-        } else if cmd == "pwd" {
-            if let Ok(current_dir) = std::env::current_dir() {
-                write_stdout(&current_dir.display().to_string());
-            }
-        } else if cmd == "cd" {
-            let target = match args.first().map(|s| s.as_str()) {
-                Some("~") | None => std::env::var("HOME").ok(),
-                Some(path) => Some(path.to_string()),
+                Box::new(io::stdout())
             };
 
-            if let Some(target_path) = target {
-                if let Err(_) = std::env::set_current_dir(&target_path) {
-                    write_stderr(&format!("cd: {}: No such file or directory", target_path));
-                }
-            }
-        } else if cmd == "type" {
-            if let Some(cmd_arg) = args.first() {
-                if is_builtin(cmd_arg) {
-                    write_stdout(&format!("{} is a shell builtin", cmd_arg));
-                } else if let Some(path) = get_executable_path(cmd_arg) {
-                    write_stdout(&format!("{} is {}", cmd_arg, path.display()));
+            let mut err_stream: Box<dyn Write> = if let Some(ref redir) = stderr_redir {
+                if let Ok(file) = open_file_for_redir(redir) {
+                    Box::new(file)
                 } else {
-                    write_stdout(&format!("{}: not found", cmd_arg));
-                }
-            }
-        } else if cmd == "complete" {
-            if args.first().map(|s| s.as_str()) == Some("-C") {
-                if args.len() >= 3 {
-                    let script_path = &args[1];
-                    let target_cmd = &args[2];
-                    completion_specs.insert(target_cmd.clone(), script_path.clone());
-                }
-            } else if args.first().map(|s| s.as_str()) == Some("-p") {
-                if let Some(target_cmd) = args.get(1) {
-                    if let Some(script_path) = completion_specs.get(target_cmd) {
-                        write_stdout(&format!("complete -C '{}' {}", script_path, target_cmd));
-                    } else {
-                        write_stderr(&format!("complete: {}: no completion specification", target_cmd));
-                    }
-                }
-            } else if args.first().map(|s| s.as_str()) == Some("-r") {
-                if let Some(target_cmd) = args.get(1) {
-                    completion_specs.remove(target_cmd);
-                }
-            }
-        } else if cmd == "jobs" {
-            let total_jobs = jobs.len();
-            let mut remaining_jobs = Vec::new();
-
-            for (idx, mut job) in std::mem::take(&mut jobs).into_iter().enumerate() {
-                let marker = if idx == total_jobs - 1 {
-                    '+'
-                } else if idx == total_jobs - 2 {
-                    '-'
-                } else {
-                    ' '
-                };
-
-                let is_finished = match job.child.try_wait() {
-                    Ok(Some(_status)) => true,
-                    _ => false,
-                };
-
-                if is_finished {
-                    let status_padded = format!("{:24}", "Done");
-                    let display_cmd = job.command.trim_end_matches('&').trim_end();
-                    write_stdout(&format!("[{}]{} {}  {}", job.id, marker, status_padded, display_cmd));
-                } else {
-                    let status_padded = format!("{:24}", "Running");
-                    write_stdout(&format!("[{}]{} {}  {}", job.id, marker, status_padded, job.command));
-                    remaining_jobs.push(job);
-                }
-            }
-            
-            // Retain only the jobs that are still running
-            jobs = remaining_jobs;
-        } else if cmd == "history" {
-            if args.first().map(|s| s.as_str()) == Some("-r") {
-                if let Some(path) = args.get(1) {
-                    if let Ok(content) = std::fs::read_to_string(path) {
-                        for line in content.lines() {
-                            if !line.is_empty() {
-                                history.push(line.to_string());
-                            }
-                        }
-                    }
-                }
-            } else if args.first().map(|s| s.as_str()) == Some("-w") {
-                if let Some(path) = args.get(1) {
-                    let mut content = String::new();
-                    for entry in history.iter() {
-                        content.push_str(entry);
-                        content.push('\n');
-                    }
-                    let _ = std::fs::write(path, content);
-                }
-            } else if args.first().map(|s| s.as_str()) == Some("-a") {
-                if let Some(path) = args.get(1) {
-                    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
-                        for entry in history.iter().skip(history_appended_index) {
-                            let _ = writeln!(file, "{}", entry);
-                        }
-                        history_appended_index = history.len();
-                    }
+                    Box::new(io::stderr())
                 }
             } else {
-                let count = args.first().and_then(|s| s.parse::<usize>().ok()).unwrap_or(history.len());
-                let start_idx = history.len().saturating_sub(count);
-                for (i, entry) in history.iter().enumerate().skip(start_idx) {
-                    write_stdout(&format!("{:>5}  {}", i + 1, entry));
-                }
-            }
-        } else if cmd == "declare" {
-            if args.first().map(|s| s.as_str()) == Some("-p") {
-                if let Some(var_name) = args.get(1) {
-                    if let Some(val) = shell_vars.get(var_name) {
-                        write_stdout(&format!("declare -- {}=\"{}\"", var_name, val));
-                    } else {
-                        write_stderr(&format!("declare: {}: not found", var_name));
-                    }
-                }
-            } else if let Some(arg) = args.first() {
-                if let Some((k, v)) = arg.split_once('=') {
-                    if is_valid_identifier(k) {
-                        shell_vars.insert(k.to_string(), v.to_string());
-                    } else {
-                        write_stderr(&format!("declare: `{}': not a valid identifier", arg));
-                    }
-                } else {
-                    if !is_valid_identifier(arg) {
-                        write_stderr(&format!("declare: `{}': not a valid identifier", arg));
-                    }
-                }
+                Box::new(io::stderr())
+            };
+
+            let should_exit = execute_builtin(
+                cmd,
+                args,
+                &mut completion_specs,
+                &mut jobs,
+                &mut history,
+                &mut history_appended_index,
+                &mut shell_vars,
+                &mut out_stream,
+                &mut err_stream,
+            );
+            if should_exit {
+                break;
             }
         } else if let Some(_path) = get_executable_path(cmd) {
             let mut child_cmd = Command::new(cmd);
             child_cmd.args(args);
 
             if let Some(ref redir) = stdout_redir {
-                if let Ok(file) = std::fs::OpenOptions::new().append(true).open(&redir.path) {
+                if let Ok(file) = open_file_for_redir(redir) {
                     child_cmd.stdout(Stdio::from(file));
                 }
             }
 
             if let Some(ref redir) = stderr_redir {
-                if let Ok(file) = std::fs::OpenOptions::new().append(true).open(&redir.path) {
+                if let Ok(file) = open_file_for_redir(redir) {
                     child_cmd.stderr(Stdio::from(file));
                 }
             }
 
-            // Spawn non-blocking background process if '&' token was present
             // Spawn non-blocking background process if '&' token was present
             if is_background {
                 if let Ok(child) = child_cmd.spawn() {
@@ -715,17 +572,20 @@ fn main() {
                 let _ = child_cmd.status();
             }
         } else {
-            write_stderr(&format!("{}: command not found", cmd));
+            if let Some(ref redir) = stderr_redir {
+                if let Ok(mut file) = open_file_for_redir(redir) {
+                    let _ = writeln!(file, "{}: command not found", cmd);
+                } else {
+                    eprintln!("{}: command not found", cmd);
+                }
+            } else {
+                eprintln!("{}: command not found", cmd);
+            }
         }
     }
 
     if let Ok(hist_path) = std::env::var("HISTFILE") {
-        let mut content = String::new();
-        for entry in history.iter() {
-            content.push_str(entry);
-            content.push('\n');
-        }
-        let _ = std::fs::write(hist_path, content);
+        save_history_to_file(&hist_path, &history);
     }
 }
 
@@ -821,6 +681,57 @@ fn longest_common_prefix(strs: &[&String]) -> String {
     prefix
 }
 
+fn render_completions(
+    buffer: &mut String,
+    match_refs: &[&String],
+    typed_len: usize,
+    tab_count: &mut usize,
+    base_prefix: &str,
+    append_trailing_space: bool,
+    custom_display_names: Option<&[&str]>,
+) {
+    if match_refs.is_empty() {
+        print!("\x07");
+        io::stdout().flush().unwrap();
+        *tab_count = 0;
+    } else if match_refs.len() == 1 {
+        let matched_str = match_refs[0];
+        let suffix = if append_trailing_space && !matched_str.ends_with('/') {
+            " "
+        } else {
+            ""
+        };
+        let completed = format!("{}{}{}", base_prefix, matched_str, suffix);
+        print!("\r$ {}\x1b[K", completed);
+        io::stdout().flush().unwrap();
+        *buffer = completed;
+        *tab_count = 0;
+    } else {
+        let lcp = longest_common_prefix(match_refs);
+
+        if lcp.len() > typed_len {
+            let completed = format!("{}{}", base_prefix, lcp);
+            print!("\r$ {}\x1b[K", completed);
+            io::stdout().flush().unwrap();
+            *buffer = completed;
+            *tab_count = 0;
+        } else if *tab_count == 0 {
+            print!("\x07");
+            io::stdout().flush().unwrap();
+            *tab_count = 1;
+        } else {
+            let options = if let Some(names) = custom_display_names {
+                names.join("  ")
+            } else {
+                match_refs.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("  ")
+            };
+            print!("\n{}\n$ {}", options, buffer);
+            io::stdout().flush().unwrap();
+            *tab_count = 0;
+        }
+    }
+}
+
 fn run_completer_script(
     script_path: &str,
     command_name: &str,
@@ -894,6 +805,7 @@ fn read_line_with_completion(
                             previous_word
                         };
 
+                        let word_len = word_being_completed.len();
                         if let Some(script_lines) = run_completer_script(
                             script_path,
                             command_name,
@@ -902,127 +814,60 @@ fn read_line_with_completion(
                             &buffer,
                         ) {
                             let match_refs: Vec<&String> = script_lines.iter().collect();
-
-                            if match_refs.is_empty() {
-                                print!("\x07");
-                                io::stdout().flush().unwrap();
-                                tab_count = 0;
-                            } else if match_refs.len() == 1 {
-                                let matched_str = match_refs[0];
-                                let last_space_idx = buffer.rfind(' ').unwrap();
-                                let base_prefix = &buffer[..=last_space_idx];
-                                let completed = format!("{}{}{} ", base_prefix, matched_str, if matched_str.ends_with('/') { "" } else { "" });
-                                print!("\r$ {}\x1b[K", completed);
-                                io::stdout().flush().unwrap();
-                                buffer = completed;
-                                tab_count = 0;
-                            } else {
-                                let lcp = longest_common_prefix(&match_refs);
-
-                                if lcp.len() > word_being_completed.len() {
-                                    let last_space_idx = buffer.rfind(' ').unwrap();
-                                    let base_prefix = &buffer[..=last_space_idx];
-                                    let completed = format!("{}{}", base_prefix, lcp);
-                                    print!("\r$ {}\x1b[K", completed);
-                                    io::stdout().flush().unwrap();
-                                    buffer = completed;
-                                    tab_count = 0;
-                                } else if tab_count == 0 {
-                                    print!("\x07");
-                                    io::stdout().flush().unwrap();
-                                    tab_count = 1;
-                                } else {
-                                    let options = match_refs.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("  ");
-                                    print!("\n{}\n$ {}", options, buffer);
-                                    io::stdout().flush().unwrap();
-                                    tab_count = 0;
-                                }
-                            }
+                            let last_space_idx = buffer.rfind(' ').unwrap();
+                            let base_prefix = buffer[..=last_space_idx].to_string();
+                            render_completions(
+                                &mut buffer,
+                                &match_refs,
+                                word_len,
+                                &mut tab_count,
+                                &base_prefix,
+                                true,
+                                None,
+                            );
                             continue;
                         }
                     }
 
                     let last_space_idx = buffer.rfind(' ').unwrap();
-                    let base_prefix = &buffer[..=last_space_idx];
+                    let base_prefix = buffer[..=last_space_idx].to_string();
                     let partial_arg = &buffer[last_space_idx + 1..];
+                    let partial_arg_len = partial_arg.len();
 
                     let (_, matches) = get_path_completions(partial_arg);
                     let match_refs: Vec<&String> = matches.iter().collect();
-
-                    if match_refs.is_empty() {
-                        print!("\x07");
-                        io::stdout().flush().unwrap();
-                        tab_count = 0;
-                    } else if match_refs.len() == 1 {
-                        let matched_str = match_refs[0];
-                        let suffix = if matched_str.ends_with('/') { "" } else { " " };
-                        let completed = format!("{}{}{}", base_prefix, matched_str, suffix);
-                        print!("\r$ {}\x1b[K", completed);
-                        io::stdout().flush().unwrap();
-                        buffer = completed;
-                        tab_count = 0;
-                    } else {
-                        let lcp = longest_common_prefix(&match_refs);
-
-                        if lcp.len() > partial_arg.len() {
-                            let completed = format!("{}{}", base_prefix, lcp);
-                            print!("\r$ {}\x1b[K", completed);
-                            io::stdout().flush().unwrap();
-                            buffer = completed;
-                            tab_count = 0;
-                        } else if tab_count == 0 {
-                            print!("\x07");
-                            io::stdout().flush().unwrap();
-                            tab_count = 1;
+                    let display_names: Vec<&str> = match_refs.iter().map(|s| {
+                        let trimmed = s.strip_suffix('/').unwrap_or(s);
+                        if let Some(slash_idx) = trimmed.rfind('/') {
+                            &s[slash_idx + 1..]
                         } else {
-                            let display_names: Vec<&str> = match_refs.iter().map(|s| {
-                                let trimmed = s.strip_suffix('/').unwrap_or(s);
-                                if let Some(slash_idx) = trimmed.rfind('/') {
-                                    &s[slash_idx + 1..]
-                                } else {
-                                    s.as_str()
-                                }
-                            }).collect();
-                            let options = display_names.join("  ");
-                            print!("\n{}\n$ {}", options, buffer);
-                            io::stdout().flush().unwrap();
-                            tab_count = 0;
+                            s.as_str()
                         }
-                    }
+                    }).collect();
+
+                    render_completions(
+                        &mut buffer,
+                        &match_refs,
+                        partial_arg_len,
+                        &mut tab_count,
+                        &base_prefix,
+                        true,
+                        Some(&display_names),
+                    );
                 } else {
                     let candidates = get_executable_completions();
                     let matches: Vec<&String> = candidates.iter().filter(|c| c.starts_with(&buffer)).collect();
+                    let typed_len = buffer.len();
 
-                    if matches.is_empty() {
-                        print!("\x07");
-                        io::stdout().flush().unwrap();
-                        tab_count = 0;
-                    } else if matches.len() == 1 {
-                        let completed = format!("{} ", matches[0]);
-                        print!("\r$ {}\x1b[K", completed);
-                        io::stdout().flush().unwrap();
-                        buffer = completed;
-                        tab_count = 0;
-                    } else {
-                        let lcp = longest_common_prefix(&matches);
-
-                        if lcp.len() > buffer.len() {
-                            let completed = lcp;
-                            print!("\r$ {}\x1b[K", completed);
-                            io::stdout().flush().unwrap();
-                            buffer = completed;
-                            tab_count = 0;
-                        } else if tab_count == 0 {
-                            print!("\x07");
-                            io::stdout().flush().unwrap();
-                            tab_count = 1;
-                        } else {
-                            let options = matches.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("  ");
-                            print!("\n{}\n$ {}", options, buffer);
-                            io::stdout().flush().unwrap();
-                            tab_count = 0;
-                        }
-                    }
+                    render_completions(
+                        &mut buffer,
+                        &matches,
+                        typed_len,
+                        &mut tab_count,
+                        "",
+                        true,
+                        None,
+                    );
                 }
             }
             b'\n' | b'\r' => {
